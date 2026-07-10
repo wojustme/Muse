@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "noEmit": false,
+    "outDir": "dist",
+    "rootDir": "src",
+    "types": ["node"],
+    // 服务端走 NodeNext，通过 workspace 包的 exports（dist）解析 @muse/*，
+    // 不用 base 配置里指向源码的 paths，避免把跨包源码拉进 rootDir。
+    "paths": {}
+  },
+  "include": ["src/**/*.ts"]
+}

@@ -1,0 +1,31 @@
+node_modules/
+.pnpm-store/
+dist/
+build/
+.turbo/
+.vite/
+.cache/
+.DS_Store
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.tsbuildinfo
+
+# Env
+.env
+.env.*
+!.env.example
+
+# Tauri / Rust
+target/
+apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/gen/
+
+# Package manager lockfiles not used by this repo
+bun.lock
+package-lock.json
+yarn.lock
