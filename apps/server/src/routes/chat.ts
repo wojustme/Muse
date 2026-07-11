@@ -1,12 +1,27 @@
 import { randomUUID } from "node:crypto";
 import { and, asc, eq } from "drizzle-orm";
-import { generateText, type LanguageModel, type ModelMessage } from "ai";
-import type { FastifyInstance } from "fastify";
+import {
+  generateText,
+  stepCountIs,
+  type LanguageModel,
+  type ModelMessage,
+  type StepResult,
+  type ToolSet,
+} from "ai";
+import type { FastifyBaseLogger, FastifyInstance } from "fastify";
 import { createDeepSeekProvider } from "@muse/model-router";
 import { z } from "zod";
 import { requireAuth } from "../auth/guard.js";
+import { createBuiltinToolRegistry } from "../agent/tool-registry.js";
+import type { MuseToolMetadata } from "../agent/types.js";
 import { db } from "../db/client.js";
-import { chatMessages, chatSessions, modelRuns } from "../db/schema.js";
+import {
+  chatMessages,
+  chatSessions,
+  modelRuns,
+  toolCalls,
+} from "../db/schema.js";
+import { localToolBroker } from "../local-tools/local-tool-socket.js";
 import { getAuthorizedModel } from "../models/authorized.js";
 
 const textPartSchema = z.object({
@@ -25,6 +40,12 @@ const chatRequestSchema = z.object({
     .object({
       provider: z.string().min(1),
       name: z.string().min(1),
+    })
+    .optional(),
+  localTools: z
+    .object({
+      deviceId: z.string().min(1),
+      workspaceId: z.string().min(1),
     })
     .optional(),
 });
@@ -49,6 +70,20 @@ function tokenCount(value: number | undefined): number | null {
   return typeof value === "number" ? value : null;
 }
 
+function jsonStringify(value: unknown): string {
+  return JSON.stringify(value ?? null);
+}
+
+function fallbackToolMetadata(toolName: string): MuseToolMetadata {
+  return {
+    name: toolName,
+    title: toolName,
+    source: "builtin",
+    riskLevel: "read",
+    requiresApproval: false,
+  };
+}
+
 function buildDeepSeekLanguageModel(input: {
   apiKey: string;
   baseUrl: string | null;
@@ -60,6 +95,36 @@ function buildDeepSeekLanguageModel(input: {
   });
 
   return provider.createModel(input.modelName) as LanguageModel;
+}
+
+function buildLocalToolSystemPrompt(input: {
+  localToolsEnabled: boolean;
+  availableToolNames: string[];
+}): string {
+  const base = [
+    "You are Muse, an AI assistant inside the Muse chat application.",
+    "When tools are available, use them directly instead of claiming that a capability is unavailable.",
+    `The tools registered for this request are: ${input.availableToolNames.join(", ") || "(none)"}.`,
+  ];
+
+  if (!input.localToolsEnabled) {
+    return [
+      ...base,
+      "macOS local tools are not connected for this request. If the user asks you to inspect local files, explain that they need to connect the Muse macOS Local Tool Host first.",
+    ].join("\n");
+  }
+
+  return [
+    ...base,
+    "macOS local tools are connected for this request if the registered tool list includes mac_* tools.",
+    "Use mac_list_directory to list directories inside the attached macOS workspace.",
+    "Use mac_read_file to read a text file inside the attached macOS workspace.",
+    "Use mac_search_files to search text inside files in the attached macOS workspace.",
+    "Use mac_write_file to create or overwrite a text file after desktop approval.",
+    "Use mac_apply_patch for targeted edits to existing text files after desktop approval.",
+    "Use mac_local_bash only when the user explicitly asks to run a shell command or when no safer local tool fits.",
+    "Do not say that file reading is unavailable when mac_read_file is in the registered tool list. If you need a file path, ask for it or infer it from the user's request.",
+  ].join("\n");
 }
 
 async function loadSessionHistory(input: {
@@ -93,6 +158,57 @@ async function loadSessionHistory(input: {
     }));
 }
 
+async function persistToolCalls(input: {
+  steps: Array<StepResult<ToolSet>>;
+  metadataByName: Map<string, MuseToolMetadata>;
+  modelRunId: string;
+  sessionId: string;
+  userId: string;
+  log: FastifyBaseLogger;
+}) {
+  const rows = input.steps.flatMap((step) =>
+    step.toolCalls.map((call) => {
+      const result = step.toolResults.find(
+        (toolResult) => toolResult.toolCallId === call.toolCallId,
+      );
+      const now = new Date();
+      const metadata =
+        input.metadataByName.get(call.toolName) ??
+        fallbackToolMetadata(call.toolName);
+
+      return {
+        id: randomUUID(),
+        modelRunId: input.modelRunId,
+        sessionId: input.sessionId,
+        userId: input.userId,
+        toolCallId: call.toolCallId,
+        toolName: call.toolName,
+        toolSource: metadata.source,
+        riskLevel: metadata.riskLevel,
+        inputJson: jsonStringify(call.input),
+        outputJson: result ? jsonStringify(result.output) : null,
+        status: result ? "succeeded" : "running",
+        requiresApproval: metadata.requiresApproval,
+        startedAt: now,
+        completedAt: result ? now : null,
+        createdAt: now,
+      };
+    }),
+  );
+
+  if (!rows.length) {
+    return [];
+  }
+
+  try {
+    await db.insert(toolCalls).values(rows);
+    return rows;
+  } catch (error) {
+    input.log.error({ err: error }, "persist tool calls failed");
+    return [];
+  }
+}
+
 export async function chatRoutes(app: FastifyInstance) {
   app.post("/chat", { preHandler: requireAuth }, async (request, reply) => {
     const parsed = chatRequestSchema.safeParse(request.body);
@@ -105,28 +221,31 @@ export async function chatRoutes(app: FastifyInstance) {
     }
 
     const userId = request.userId as string;
-    const [session] = await db
+    // 按 id + userId 查一次（不限 status），据此区分“已有会话”与“首消息懒创建”。
+    const [existingSession] = await db
       .select()
       .from(chatSessions)
       .where(
         and(
           eq(chatSessions.id, parsed.data.sessionId),
           eq(chatSessions.userId, userId),
-          eq(chatSessions.status, "active"),
         ),
       )
       .limit(1);
 
-    if (!session) {
+    // 命中但已归档/删除的会话不允许再写入。
+    if (existingSession && existingSession.status !== "active") {
       return reply.status(404).send({ error: "Session not found" });
     }
 
+    const isNewSession = !existingSession;
+
     const modelSelection =
       parsed.data.model ??
-      (session.modelProvider && session.modelName
+      (existingSession?.modelProvider && existingSession.modelName
         ? {
-            provider: session.modelProvider,
-            name: session.modelName,
+            provider: existingSession.modelProvider,
+            name: existingSession.modelName,
           }
         : null);
 
@@ -160,11 +279,36 @@ export async function chatRoutes(app: FastifyInstance) {
     const assistantMessageId = randomUUID();
     const runId = randomUUID();
     const now = new Date();
+    // 新会话与已有会话统一用这几个本地量，避免散落的 session.* 分支。
+    const sessionId = parsed.data.sessionId;
+    const sessionMessageCount = existingSession?.messageCount ?? 0;
     const nextTitle =
-      session.messageCount === 0 ? titleFromPrompt(prompt) : session.title;
-    const history = await loadSessionHistory({
-      sessionId: session.id,
+      existingSession && existingSession.messageCount > 0
+        ? existingSession.title
+        : titleFromPrompt(prompt);
+    const history = isNewSession
+      ? []
+      : await loadSessionHistory({
+          sessionId,
+          userId,
+        });
+    const toolRegistry = createBuiltinToolRegistry({
       userId,
+      sessionId,
+      runId,
+      deviceId: parsed.data.localTools?.deviceId,
+      workspaceId: parsed.data.localTools?.workspaceId,
+      localToolBroker,
+    });
+    const availableToolNames = Object.keys(toolRegistry.tools);
+    const localToolsEnabled = Boolean(
+      parsed.data.localTools?.deviceId &&
+        parsed.data.localTools?.workspaceId &&
+        availableToolNames.some((toolName) => toolName.startsWith("mac_")),
+    );
+    const systemPrompt = buildLocalToolSystemPrompt({
+      localToolsEnabled,
+      availableToolNames,
     });
     const messages: ModelMessage[] = [
       ...history,
@@ -174,10 +318,40 @@ export async function chatRoutes(app: FastifyInstance) {
       },
     ];
 
+    request.log.info(
+      {
+        sessionId,
+        runId,
+        localTools: parsed.data.localTools,
+        availableToolNames,
+      },
+      "chat tool registry prepared",
+    );
+
     await db.transaction(async (tx) => {
+      // 首消息懒创建：会话与第一条消息在同一事务里原子落库，
+      // 保证 chat_sessions 里不会存在没有任何消息的空会话。
+      if (isNewSession) {
+        await tx.insert(chatSessions).values({
+          id: sessionId,
+          userId,
+          title: nextTitle,
+          modelProvider: model.provider,
+          modelName: model.modelName,
+          aiModelId: model.id,
+          status: "active",
+          pinned: false,
+          messageCount: 0,
+          lastMessagePreview: null,
+          lastMessageAt: null,
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+
       await tx.insert(chatMessages).values({
         id: userMessageId,
-        sessionId: session.id,
+        sessionId,
         userId,
         role: "user",
         content: prompt,
@@ -192,7 +366,7 @@ export async function chatRoutes(app: FastifyInstance) {
 
       await tx.insert(modelRuns).values({
         id: runId,
-        sessionId: session.id,
+        sessionId,
         userId,
         requestMessageId: userMessageId,
         aiModelId: model.id,
@@ -213,7 +387,10 @@ export async function chatRoutes(app: FastifyInstance) {
           baseUrl: model.baseUrl,
           modelName: model.modelName,
         }),
+        system: systemPrompt,
         messages,
+        tools: toolRegistry.tools,
+        stopWhen: stepCountIs(5),
       });
     } catch (error) {
       const failedAt = new Date();
@@ -238,12 +415,12 @@ export async function chatRoutes(app: FastifyInstance) {
             modelProvider: model.provider,
             modelName: model.modelName,
             aiModelId: model.id,
-            messageCount: session.messageCount + 1,
+            messageCount: sessionMessageCount + 1,
             lastMessagePreview: previewFromText(prompt),
             lastMessageAt: failedAt,
             updatedAt: failedAt,
           })
-          .where(eq(chatSessions.id, session.id));
+          .where(eq(chatSessions.id, sessionId));
       });
 
       return reply.status(502).send({
@@ -255,11 +432,19 @@ export async function chatRoutes(app: FastifyInstance) {
     const completedAt = new Date();
     const assistantText = result.text.trim() || "模型返回了空响应。";
     const assistantParts = [{ type: "text", text: assistantText }];
+    const persistedToolCalls = await persistToolCalls({
+      steps: result.steps,
+      metadataByName: toolRegistry.metadataByName,
+      modelRunId: runId,
+      sessionId,
+      userId,
+      log: request.log,
+    });
 
     await db.transaction(async (tx) => {
       await tx.insert(chatMessages).values({
         id: assistantMessageId,
-        sessionId: session.id,
+        sessionId,
         userId,
         role: "assistant",
         content: assistantText,
@@ -291,17 +476,17 @@ export async function chatRoutes(app: FastifyInstance) {
           modelProvider: model.provider,
           modelName: model.modelName,
           aiModelId: model.id,
-          messageCount: session.messageCount + 2,
+          messageCount: sessionMessageCount + 2,
           lastMessagePreview: previewFromText(assistantText),
           lastMessageAt: completedAt,
           updatedAt: completedAt,
         })
-        .where(eq(chatSessions.id, session.id));
+        .where(eq(chatSessions.id, sessionId));
     });
 
     return {
       id: assistantMessageId,
-      sessionId: session.id,
+      sessionId,
       role: "assistant",
       parts: assistantParts,
       createdAt: completedAt.toISOString(),
@@ -309,13 +494,22 @@ export async function chatRoutes(app: FastifyInstance) {
         provider: model.provider,
         name: model.modelName,
       },
+      toolCalls: persistedToolCalls.map((toolCall) => ({
+        id: toolCall.id,
+        toolCallId: toolCall.toolCallId,
+        name: toolCall.toolName,
+        source: toolCall.toolSource,
+        riskLevel: toolCall.riskLevel,
+        status: toolCall.status,
+        requiresApproval: toolCall.requiresApproval,
+      })),
       session: {
-        id: session.id,
+        id: sessionId,
         title: nextTitle,
         updatedAt: completedAt.toISOString(),
         modelProvider: model.provider,
         modelName: model.modelName,
-        messageCount: session.messageCount + 2,
+        messageCount: sessionMessageCount + 2,
         lastMessagePreview: previewFromText(assistantText),
       },
     };

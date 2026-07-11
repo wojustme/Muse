@@ -11,7 +11,6 @@ import {
   Loader2,
   LogOut,
   MessageSquare,
-  Monitor,
   Paperclip,
   PanelRight,
   Plus,
@@ -33,6 +32,12 @@ import {
 import type { AuthUser } from "@muse/shared";
 import { authHeaders, fetchMe, logout } from "./auth/client";
 import { LoginScreen } from "./auth/LoginScreen";
+import {
+  LocalToolBridge,
+  type LocalToolApprovalRequest,
+  type LocalToolBridgeSnapshot,
+  type WorkspaceBinding,
+} from "./local-tools/bridge";
 
 type Message = {
   id: string;
@@ -51,12 +56,16 @@ type ModelOption = ModelSelection & {
   capabilities?: string[];
 };
 
+type ApprovalPrompt = LocalToolApprovalRequest & {
+  resolve: (approved: boolean) => void;
+};
+
 type Session = {
   id: string;
   title: string;
   preview: string;
   updatedAt: string;
-  model: ModelSelection;
+  model: ModelSelection | null;
   messages: Message[];
   messagesLoaded: boolean;
   isDraft?: boolean;
@@ -82,36 +91,25 @@ type ServerMessage = {
 };
 
 const serverUrl = import.meta.env.VITE_SERVER_URL ?? "http://127.0.0.1:8787";
-
-const fallbackModels: ModelOption[] = [
-  {
-    provider: "openai",
-    name: "gpt-4o-mini",
-    capabilities: ["streaming", "tools", "vision"],
-  },
-  {
-    provider: "deepseek",
-    name: "deepseek-chat",
-    capabilities: ["streaming"],
-  },
-  {
-    provider: "glm",
-    name: "glm-4-flash",
-    capabilities: ["streaming"],
-  },
-];
-
-const defaultModel = fallbackModels[0] as ModelOption;
+const defaultWorkspace: WorkspaceBinding = {
+  workspaceId: "downloads",
+  displayName: "Downloads",
+  rootPath: "/Users/bytedance/Downloads",
+};
 
 function modelKey(model: ModelSelection): string {
   return `${model.provider}:${model.name}`;
 }
 
-function modelLabel(model: ModelSelection): string {
-  return `${model.provider}/${model.name}`;
+function modelLabel(model: ModelSelection | null | undefined): string {
+  if (!model) {
+    return "未选择模型";
+  }
+
+  return model.displayName || `${model.provider}/${model.name}`;
 }
 
-function createDraftSession(model: ModelSelection): Session {
+function createDraftSession(model: ModelSelection | null): Session {
   return {
     id: crypto.randomUUID(),
     title: "新对话",
@@ -167,11 +165,11 @@ async function fetchModels(): Promise<ModelOption[]> {
         ...model,
         capabilities: model.capabilities ?? [],
       }))
-    : fallbackModels;
+    : [];
 }
 
 async function fetchSessions(
-  defaultSelection: ModelSelection,
+  defaultSelection?: ModelSelection | null,
 ): Promise<Session[]> {
   const response = await fetch(`${serverUrl}/api/sessions`, {
     headers: authHeaders(),
@@ -189,40 +187,28 @@ async function fetchSessions(
 
 function sessionFromServer(
   session: ServerSession,
-  defaultSelection: ModelSelection,
+  defaultSelection?: ModelSelection | null,
   messages: Message[] = [],
   messagesLoaded = false,
 ): Session {
+  const model =
+    session.modelProvider && session.modelName
+      ? {
+          provider: session.modelProvider,
+          name: session.modelName,
+        }
+      : (defaultSelection ?? null);
+
   return {
     id: session.id,
     title: session.title,
     preview: session.lastMessagePreview ?? "打开 session 继续对话。",
     updatedAt: formatTime(session.updatedAt),
-    model: {
-      provider: session.modelProvider ?? defaultSelection.provider,
-      name: session.modelName ?? defaultSelection.name,
-    },
+    model,
     messages,
     messagesLoaded,
     isDraft: false,
   };
-}
-
-async function createServerSession(model: ModelSelection): Promise<ServerSession> {
-  const response = await fetch(`${serverUrl}/api/sessions`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      ...authHeaders(),
-    },
-    body: JSON.stringify({ model }),
-  });
-  if (!response.ok) {
-    throw new Error(`创建会话失败（${response.status}）`);
-  }
-
-  const data = (await response.json()) as { session: ServerSession };
-  return data.session;
 }
 
 function messageText(message: ServerMessage): string {
@@ -333,20 +319,54 @@ function ChatApp({
   user: AuthUser;
   onLogout: () => void | Promise<void>;
 }) {
-  const [models, setModels] = useState<ModelOption[]>(fallbackModels);
-  const [sessions, setSessions] = useState<Session[]>(() => [
-    createDraftSession(defaultModel),
-  ]);
+  const [models, setModels] = useState<ModelOption[]>([]);
+  const [sessions, setSessions] = useState<Session[]>([]);
   const [input, setInput] = useState("");
   const [isBootstrapping, setIsBootstrapping] = useState(true);
   const [isSending, setIsSending] = useState(false);
   const [isCreatingSession, setIsCreatingSession] = useState(false);
   const [activeSessionId, setActiveSessionId] = useState(sessions[0]?.id ?? "");
-  const [selectedModel, setSelectedModel] =
-    useState<ModelSelection>(defaultModel);
+  const [selectedModel, setSelectedModel] = useState<ModelSelection | null>(
+    null,
+  );
   const [searchText, setSearchText] = useState("");
   const [notice, setNotice] = useState<string>("");
+  const [localToolSnapshot, setLocalToolSnapshot] =
+    useState<LocalToolBridgeSnapshot | null>(null);
+  const [approvalPrompt, setApprovalPrompt] = useState<ApprovalPrompt | null>(
+    null,
+  );
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const localToolBridgeRef = useRef<LocalToolBridge | null>(null);
+
+  useEffect(() => {
+    const bridge = new LocalToolBridge({
+      serverUrl,
+      workspace: defaultWorkspace,
+      onStatus: setLocalToolSnapshot,
+      onApproval: (request) =>
+        new Promise<boolean>((resolve) => {
+          setApprovalPrompt({
+            ...request,
+            resolve,
+          });
+        }),
+    });
+    localToolBridgeRef.current = bridge;
+    setLocalToolSnapshot(bridge.snapshot());
+    bridge.connect();
+
+    return () => {
+      bridge.disconnect();
+      setApprovalPrompt((current) => {
+        current?.resolve(false);
+        return null;
+      });
+      if (localToolBridgeRef.current === bridge) {
+        localToolBridgeRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -357,11 +377,13 @@ function ChatApp({
 
       try {
         const loadedModels = await fetchModels();
-        const nextModel = loadedModels[0] ?? defaultModel;
+        const nextModel = loadedModels[0] ?? null;
         const loadedSessions = await fetchSessions(nextModel);
         let nextSessions = loadedSessions.length
           ? loadedSessions
-          : [createDraftSession(nextModel)];
+          : nextModel
+            ? [createDraftSession(nextModel)]
+            : [];
 
         if (nextSessions[0] && !nextSessions[0].messagesLoaded) {
           const loadedMessages = await fetchSessionMessages(nextSessions[0].id);
@@ -385,15 +407,20 @@ function ChatApp({
         setSelectedModel(nextSessions[0]?.model ?? nextModel);
         setSessions(nextSessions);
         setActiveSessionId(nextSessions[0]?.id ?? "");
+
+        if (!loadedModels.length) {
+          setNotice("后端未返回可用模型，请先确认当前账号的模型授权。");
+        }
       } catch (error) {
         if (cancelled) {
           return;
         }
 
         setNotice(error instanceof Error ? error.message : "初始化失败");
-        setModels(fallbackModels);
-        setSessions([createDraftSession(defaultModel)]);
-        setSelectedModel(defaultModel);
+        setModels([]);
+        setSessions([]);
+        setSelectedModel(null);
+        setActiveSessionId("");
       } finally {
         if (!cancelled) {
           setIsBootstrapping(false);
@@ -412,20 +439,22 @@ function ChatApp({
     () =>
       sessions.find((session) => session.id === activeSessionId) ??
       sessions[0] ??
-      createDraftSession(selectedModel),
+      null,
     [activeSessionId, selectedModel, sessions],
   );
 
-  const messages = activeSession.messages;
+  const messages = activeSession?.messages ?? [];
 
   const filteredSessions = useMemo(() => {
+    // 草稿会话（尚未发送首条消息）不进入左侧历史列表，仅作为当前活动会话展示。
+    const persisted = sessions.filter((session) => !session.isDraft);
     const keyword = searchText.trim().toLowerCase();
 
     if (!keyword) {
-      return sessions;
+      return persisted;
     }
 
-    return sessions.filter((session) =>
+    return persisted.filter((session) =>
       [session.title, session.preview, modelLabel(session.model)]
         .join(" ")
         .toLowerCase()
@@ -433,36 +462,38 @@ function ChatApp({
     );
   }, [searchText, sessions]);
 
-  async function startNewSession() {
+  function startNewSession() {
     if (isCreatingSession) {
       return;
     }
-
-    setIsCreatingSession(true);
-    setNotice("");
-
-    try {
-      const session = await createServerSession(selectedModel);
-      const nextSession = sessionFromServer(session, selectedModel, [], true);
-
-      setSessions((current) => [nextSession, ...current]);
-      setActiveSessionId(nextSession.id);
-    } catch (error) {
-      setNotice(
-        error instanceof Error
-          ? error.message
-          : "创建会话失败。",
-      );
-    } finally {
-      setInput("");
-      setIsCreatingSession(false);
-      window.requestAnimationFrame(() => inputRef.current?.focus());
+    if (!selectedModel) {
+      setNotice("没有可用模型，无法创建新会话。");
+      return;
     }
+
+    setNotice("");
+    setInput("");
+
+    if (activeSession?.isDraft && activeSession.messages.length === 0) {
+      window.requestAnimationFrame(() => inputRef.current?.focus());
+      return;
+    }
+
+    const nextSession = createDraftSession(selectedModel);
+
+    setSessions((current) => [
+      nextSession,
+      ...current.filter(
+        (session) => !session.isDraft || session.messages.length > 0,
+      ),
+    ]);
+    setActiveSessionId(nextSession.id);
+    window.requestAnimationFrame(() => inputRef.current?.focus());
   }
 
   function switchSession(session: Session) {
     setActiveSessionId(session.id);
-    setSelectedModel(session.model);
+    setSelectedModel(session.model ?? models[0] ?? null);
     setInput("");
 
     if (!session.messagesLoaded) {
@@ -490,13 +521,16 @@ function ChatApp({
   }
 
   function updateActiveModel(modelKeyValue: string) {
-    const nextModel =
-      models.find((model) => modelKey(model) === modelKeyValue) ?? defaultModel;
+    const nextModel = models.find((model) => modelKey(model) === modelKeyValue);
+
+    if (!nextModel) {
+      return;
+    }
 
     setSelectedModel(nextModel);
     setSessions((current) =>
       current.map((session) =>
-        session.id === activeSession.id
+        session.id === activeSession?.id
           ? {
               ...session,
               model: nextModel,
@@ -535,6 +569,10 @@ function ChatApp({
     if (!text || isSending) {
       return;
     }
+    if (!selectedModel) {
+      setNotice("没有可用模型，无法发送消息。");
+      return;
+    }
 
     setInput("");
     setIsSending(true);
@@ -543,16 +581,15 @@ function ChatApp({
     try {
       let targetSession = activeSession;
 
-      if (targetSession.isDraft) {
-        const created = await createServerSession(selectedModel);
-        targetSession = sessionFromServer(created, selectedModel, [], true);
-        setSessions((current) =>
-          current.map((session) =>
-            session.id === activeSession.id ? targetSession : session,
-          ),
-        );
-        setActiveSessionId(targetSession.id);
+      if (!targetSession) {
+        // 没有任何会话时，先建一个本地草稿并加入列表（仍不落库）。
+        const draft = createDraftSession(selectedModel);
+        targetSession = draft;
+        setSessions((current) => [draft, ...current]);
+        setActiveSessionId(draft.id);
       }
+
+      const targetSessionId = targetSession.id;
 
       const userMessage: Message = {
         id: crypto.randomUUID(),
@@ -560,7 +597,7 @@ function ChatApp({
         text,
       };
 
-      appendMessage(targetSession.id, userMessage, titleFromPrompt(text));
+      appendMessage(targetSessionId, userMessage, titleFromPrompt(text));
 
       const response = await fetch(`${serverUrl}/api/chat`, {
         method: "POST",
@@ -569,8 +606,14 @@ function ChatApp({
           ...authHeaders(),
         },
         body: JSON.stringify({
-          sessionId: targetSession.id,
+          sessionId: targetSessionId,
           model: selectedModel,
+          localTools: localToolSnapshot
+            ? {
+                deviceId: localToolSnapshot.deviceId,
+                workspaceId: localToolSnapshot.workspace.workspaceId,
+              }
+            : undefined,
           message: {
             id: userMessage.id,
             role: "user",
@@ -588,11 +631,32 @@ function ChatApp({
         data.parts?.find((part: { type: string }) => part.type === "text")
           ?.text ?? "No response text returned.";
 
-      appendMessage(targetSession.id, {
+      appendMessage(targetSessionId, {
         id: data.id ?? crypto.randomUUID(),
         role: "assistant",
         text: assistantText,
       });
+
+      // 首消息发送成功后会话才在后端落库：去掉草稿标记并同步后端元信息。
+      const persistedSession = data.session as ServerSession | undefined;
+      if (persistedSession) {
+        setSessions((current) =>
+          current.map((session) =>
+            session.id === targetSessionId
+              ? {
+                  ...session,
+                  isDraft: false,
+                  title: persistedSession.title ?? session.title,
+                  updatedAt: persistedSession.updatedAt
+                    ? formatTime(persistedSession.updatedAt)
+                    : session.updatedAt,
+                  preview:
+                    persistedSession.lastMessagePreview ?? session.preview,
+                }
+              : session,
+          ),
+        );
+      }
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "发送失败");
     } finally {
@@ -619,24 +683,15 @@ function ChatApp({
     void sendCurrentMessage();
   }
 
+  function resolveApproval(approved: boolean) {
+    setApprovalPrompt((current) => {
+      current?.resolve(approved);
+      return null;
+    });
+  }
+
   return (
     <main className="app-layout">
-      <header className="window-titlebar">
-        <div className="traffic-lights" aria-hidden="true">
-          <span className="traffic-close" />
-          <span className="traffic-minimize" />
-          <span className="traffic-maximize" />
-        </div>
-        <div className="window-title">
-          <Monitor aria-hidden="true" size={14} strokeWidth={2.2} />
-          <span>Muse Desktop</span>
-        </div>
-        <div className="window-status">
-          <span className="status-dot" />
-          Local server
-        </div>
-      </header>
-
       <nav className="app-rail" aria-label="Workspace">
         <div className="rail-logo">M</div>
         <button className="rail-button active" title="Chat" type="button">
@@ -688,7 +743,7 @@ function ChatApp({
 
         <button
           className="new-chat-button"
-          disabled={isCreatingSession}
+          disabled={isCreatingSession || isBootstrapping || !selectedModel}
           onClick={startNewSession}
           type="button"
         >
@@ -727,7 +782,7 @@ function ChatApp({
           {filteredSessions.map((session) => (
             <button
               className={`session-card ${
-                session.id === activeSession.id ? "active" : ""
+                session.id === activeSession?.id ? "active" : ""
               }`}
               key={session.id}
               onClick={() => switchSession(session)}
@@ -757,7 +812,7 @@ function ChatApp({
               <LayoutList aria-hidden="true" size={15} strokeWidth={2.2} />
               Session
             </span>
-            <h1>{activeSession.title}</h1>
+            <h1>{activeSession?.title ?? "新对话"}</h1>
           </div>
         </header>
 
@@ -807,6 +862,7 @@ function ChatApp({
                 aria-label="Message"
                 onKeyDown={handleComposerKeyDown}
                 onChange={(event) => setInput(event.target.value)}
+                disabled={!selectedModel || isBootstrapping}
                 placeholder="What would you like to know?"
                 ref={inputRef}
                 rows={3}
@@ -831,11 +887,17 @@ function ChatApp({
                     <Sparkles aria-hidden="true" size={17} strokeWidth={2.2} />
                     <select
                       aria-label="Model"
+                      disabled={isBootstrapping || !models.length}
                       onChange={(event) =>
                         updateActiveModel(event.target.value)
                       }
-                      value={modelKey(selectedModel)}
+                      value={selectedModel ? modelKey(selectedModel) : ""}
                     >
+                      {models.length ? null : (
+                        <option value="">
+                          {isBootstrapping ? "加载模型中" : "无可用模型"}
+                        </option>
+                      )}
                       {models.map((model) => (
                         <option key={modelKey(model)} value={modelKey(model)}>
                           {modelLabel(model)}
@@ -851,7 +913,12 @@ function ChatApp({
 
                   <button
                     className="send-button"
-                    disabled={isSending || !input.trim()}
+                    disabled={
+                      isSending ||
+                      !input.trim() ||
+                      !selectedModel ||
+                      isBootstrapping
+                    }
                     type="submit"
                   >
                     {isSending ? (
@@ -882,7 +949,7 @@ function ChatApp({
               Session
             </span>
           </div>
-          <h2>{activeSession.title}</h2>
+          <h2>{activeSession?.title ?? "新对话"}</h2>
           <dl className="session-facts">
             <div>
               <dt>Model</dt>
@@ -894,7 +961,7 @@ function ChatApp({
             </div>
             <div>
               <dt>Updated</dt>
-              <dd>{activeSession.updatedAt}</dd>
+              <dd>{activeSession?.updatedAt ?? "Now"}</dd>
             </div>
           </dl>
         </div>
@@ -922,6 +989,27 @@ function ChatApp({
               <span>Memory</span>
               <strong>Session</strong>
             </div>
+            <div>
+              <span
+                className={`runtime-dot ${
+                  localToolSnapshot?.status === "ready" ? "ready" : ""
+                }`}
+              />
+              <span>Local Tools</span>
+              <strong>{localToolSnapshot?.status ?? "disabled"}</strong>
+            </div>
+            <div>
+              <span className="runtime-dot ready" />
+              <span>Workspace</span>
+              <strong>{localToolSnapshot?.workspace.displayName ?? "-"}</strong>
+            </div>
+            <div>
+              <span
+                className={`runtime-dot ${approvalPrompt ? "warning" : ""}`}
+              />
+              <span>Approval</span>
+              <strong>{approvalPrompt ? "Waiting" : "Idle"}</strong>
+            </div>
           </div>
         </div>
 
@@ -936,7 +1024,9 @@ function ChatApp({
             {messages.slice(-4).length ? (
               messages.slice(-4).map((message) => (
                 <div className="activity-item" key={message.id}>
-                  <strong>{message.role === "assistant" ? "Muse" : "You"}</strong>
+                  <strong>
+                    {message.role === "assistant" ? "Muse" : "You"}
+                  </strong>
                   <span>{message.text}</span>
                 </div>
               ))
@@ -946,6 +1036,49 @@ function ChatApp({
           </div>
         </div>
       </aside>
+
+      {approvalPrompt ? (
+        <div
+          aria-labelledby="approval-title"
+          aria-modal="true"
+          className="approval-backdrop"
+          role="dialog"
+        >
+          <section className="approval-dialog">
+            <div className="approval-header">
+              <div>
+                <span>{approvalPrompt.riskLevel}</span>
+                <h2 id="approval-title">{approvalPrompt.title}</h2>
+              </div>
+              <ShieldCheck aria-hidden="true" size={22} strokeWidth={2.1} />
+            </div>
+            <dl className="approval-details">
+              {approvalPrompt.details.map((detail) => (
+                <div key={detail.label}>
+                  <dt>{detail.label}</dt>
+                  <dd>{detail.value}</dd>
+                </div>
+              ))}
+            </dl>
+            <div className="approval-actions">
+              <button
+                className="approval-button secondary"
+                onClick={() => resolveApproval(false)}
+                type="button"
+              >
+                Reject
+              </button>
+              <button
+                className="approval-button primary"
+                onClick={() => resolveApproval(true)}
+                type="button"
+              >
+                Allow
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </main>
   );
 }

@@ -70,6 +70,10 @@ pnpm dev:server
 pnpm dev:desktop
 ```
 
+`pnpm dev:desktop` 使用稳定的 macOS debug bundle 启动方式：先构建桌面端 debug app，再通过完整路径打开
+`apps/desktop/src-tauri/target/debug/bundle/macos/Muse.app`，避免误启动 release app 或裸
+`target/debug/muse-desktop`。
+
 启动 Web 端：
 
 ```bash
@@ -165,7 +169,8 @@ VITE_SERVER_URL=http://127.0.0.1:8787
 ```bash
 pnpm dev              # 并行启动 server 和 desktop app
 pnpm dev:server       # 启动 Fastify 开发服务
-pnpm dev:desktop      # 启动 Tauri 桌面端
+pnpm dev:desktop      # 按 muse-dev 流程构建并启动 macOS debug bundle
+pnpm dev:desktop:tauri # 使用 tauri dev 热加载启动桌面端
 pnpm dev:desktop:web  # 只启动 desktop 的 Vite 前端
 pnpm dev:web          # 启动浏览器 Web 客户端
 pnpm build            # 按 workspace 顺序构建

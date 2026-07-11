@@ -5,9 +5,10 @@
   "packageManager": "pnpm@11.7.0",
   "type": "module",
   "scripts": {
-    "dev": "pnpm --parallel --filter @muse/server --filter @muse/desktop run dev:app",
-    "dev:desktop": "pnpm --filter @muse/desktop run dev:app",
+    "dev": "pnpm --parallel dev:server dev:desktop",
+    "dev:desktop": "node scripts/muse-dev-desktop.mjs",
     "dev:desktop:web": "pnpm --filter @muse/desktop run dev:web",
+    "dev:desktop:tauri": "pnpm --filter @muse/desktop run dev:tauri",
     "dev:web": "pnpm --filter @muse/web run dev",
     "dev:server": "pnpm --filter @muse/server run dev",
     "build": "pnpm -r --sort run build",

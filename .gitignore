@@ -36,3 +36,7 @@ apps/desktop/src-tauri/gen/
 bun.lock
 package-lock.json
 yarn.lock
+
+# IDE
+.idea/
+.vscode/*.local

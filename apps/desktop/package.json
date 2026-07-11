@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "pnpm run dev:web",
     "dev:web": "vite --host 127.0.0.1",
-    "dev:app": "tauri dev",
+    "dev:app": "node ../../scripts/muse-dev-desktop.mjs",
+    "dev:tauri": "tauri dev",
     "build": "tsc -b && vite build",
     "build:app": "tauri build",
     "preview": "vite preview",

@@ -38,87 +38,16 @@ button {
 
 .app-layout {
   display: grid;
-  grid-template-columns: 64px 304px minmax(0, 1fr) 292px;
-  grid-template-rows: 38px minmax(0, 1fr);
-  grid-template-areas:
-    "title title title title"
-    "rail sessions chat context";
+  grid-template-columns:
+    64px minmax(248px, 304px) minmax(360px, 1fr)
+    minmax(248px, 292px);
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-areas: "rail sessions chat context";
   width: 100vw;
   height: 100vh;
   min-width: 0;
+  min-height: 0;
   background: #eef2f6;
-}
-
-.window-titlebar {
-  grid-area: title;
-  display: grid;
-  grid-template-columns: 180px minmax(0, 1fr) 180px;
-  align-items: center;
-  min-width: 0;
-  padding: 0 14px;
-  border-bottom: 1px solid #d8e0ea;
-  background: #f7f9fb;
-  user-select: none;
-}
-
-.traffic-lights {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.traffic-lights span {
-  width: 12px;
-  height: 12px;
-  border-radius: 999px;
-  box-shadow: inset 0 0 0 1px rgb(17 24 39 / 10%);
-}
-
-.traffic-close {
-  background: #ff5f57;
-}
-
-.traffic-minimize {
-  background: #febc2e;
-}
-
-.traffic-maximize {
-  background: #28c840;
-}
-
-.window-title {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  min-width: 0;
-  color: #344054;
-  font-size: 13px;
-  font-weight: 760;
-}
-
-.window-title span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.window-status {
-  display: inline-flex;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 7px;
-  color: #667085;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  background: #16a34a;
-  box-shadow: 0 0 0 3px rgb(22 163 74 / 14%);
 }
 
 .app-rail {
@@ -525,6 +454,10 @@ button {
   background: #16a34a;
 }
 
+.runtime-dot.warning {
+  background: #d97706;
+}
+
 .runtime-list span {
   overflow: hidden;
   color: #475467;
@@ -582,7 +515,8 @@ button {
   justify-content: flex-start;
   gap: 20px;
   min-width: 0;
-  padding: 0 28px;
+  min-height: 0;
+  padding: 0 clamp(14px, 2.4vw, 28px);
   border-bottom: 1px solid #e2e8f0;
   background: #ffffff;
 }
@@ -653,6 +587,11 @@ button {
   outline: none;
 }
 
+.model-select select:disabled {
+  cursor: not-allowed;
+  color: #667085;
+}
+
 .chat-canvas {
   position: relative;
   display: grid;
@@ -707,7 +646,7 @@ button {
 .conversation-scroll {
   min-height: 0;
   overflow: auto;
-  padding: 26px 32px 18px;
+  padding: 26px clamp(14px, 3vw, 32px) 18px;
 }
 
 .message-list {
@@ -794,9 +733,9 @@ button {
 }
 
 .bottom-dock {
-  width: min(880px, calc(100% - 64px));
+  width: min(880px, calc(100% - clamp(28px, 6vw, 64px)));
   margin: 0 auto;
-  padding: 0 0 26px;
+  padding: 0 0 clamp(14px, 3vh, 26px);
 }
 
 .composer {
@@ -922,16 +861,171 @@ button {
   white-space: nowrap;
 }
 
+.approval-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(15 23 42 / 42%);
+}
+
+.approval-dialog {
+  display: grid;
+  gap: 16px;
+  width: min(560px, calc(100vw - 48px));
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  padding: 18px;
+  border: 1px solid #d8e0ea;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 24px 70px rgb(15 23 42 / 28%);
+}
+
+.approval-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+}
+
+.approval-header div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.approval-header span {
+  width: fit-content;
+  padding: 3px 7px;
+  border-radius: 999px;
+  color: #92400e;
+  background: #fef3c7;
+  font-size: 11px;
+  font-weight: 820;
+  text-transform: uppercase;
+}
+
+.approval-header h2 {
+  margin: 0;
+  color: #111827;
+  font-size: 18px;
+  font-weight: 830;
+}
+
+.approval-header svg {
+  flex: 0 0 auto;
+  color: #475467;
+}
+
+.approval-details {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  margin: 0;
+}
+
+.approval-details div {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.approval-details dt {
+  color: #667085;
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.approval-details dd {
+  min-width: 0;
+  max-height: 190px;
+  margin: 0;
+  overflow: auto;
+  padding: 9px 10px;
+  border: 1px solid #e4eaf1;
+  border-radius: 7px;
+  color: #111827;
+  background: #f8fafc;
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Monaco,
+    Consolas,
+    "Liberation Mono",
+    monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.approval-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  min-width: 0;
+}
+
+.approval-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 92px;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 780;
+}
+
+.approval-button.primary {
+  color: #ffffff;
+  background: #111827;
+}
+
+.approval-button.primary:hover {
+  background: #263244;
+}
+
+.approval-button.secondary {
+  color: #344054;
+  background: #eef2f6;
+}
+
+.approval-button.secondary:hover {
+  background: #e2e8f0;
+}
+
 @media (max-width: 1180px) {
   .app-layout {
-    grid-template-columns: 64px 292px minmax(0, 1fr);
-    grid-template-areas:
-      "title title title"
-      "rail sessions chat";
+    grid-template-columns: 56px minmax(236px, 276px) minmax(0, 1fr);
+    grid-template-areas: "rail sessions chat";
   }
 
-  .window-titlebar {
-    grid-template-columns: 160px minmax(0, 1fr) 160px;
+  .app-rail {
+    padding: 12px 8px;
+  }
+
+  .rail-logo {
+    width: 34px;
+    height: 34px;
+    font-size: 16px;
+  }
+
+  .rail-button {
+    width: 36px;
+    height: 36px;
+  }
+
+  .session-sidebar {
+    gap: 10px;
+    padding: 14px 10px;
   }
 
   .context-panel {
@@ -939,31 +1033,31 @@ button {
   }
 }
 
-@media (max-width: 840px) {
+@media (max-width: 900px) {
   .app-layout {
-    grid-template-columns: 1fr;
-    grid-template-rows: 38px minmax(0, 1fr);
-    grid-template-areas:
-      "title"
-      "chat";
-  }
-
-  .window-titlebar {
-    grid-template-columns: 80px minmax(0, 1fr) 80px;
-  }
-
-  .window-status {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .app-rail {
-    display: none;
+    grid-template-columns: 52px minmax(208px, 240px) minmax(0, 1fr);
+    grid-template-areas: "rail sessions chat";
   }
 
   .session-sidebar {
+    padding: 12px 8px;
+  }
+
+  .brand-copy span,
+  .session-card-preview,
+  .session-card-meta span {
     display: none;
+  }
+
+  .session-card {
+    grid-template-columns: 26px minmax(0, 1fr);
+    gap: 8px;
+    padding: 8px;
+  }
+
+  .session-icon {
+    width: 26px;
+    height: 26px;
   }
 
   .chat-shell {
@@ -971,32 +1065,32 @@ button {
   }
 
   .topbar {
-    align-items: stretch;
-    flex-direction: column;
-    gap: 12px;
-    padding: 14px;
+    min-height: 58px;
+    padding: 10px 14px;
   }
 
   .topbar h1 {
-    font-size: 19px;
+    font-size: 18px;
   }
 
   .conversation-scroll {
-    padding: 18px 14px 14px;
+    padding: 16px 12px 12px;
   }
 
   .bottom-dock {
-    width: calc(100vw - 28px);
-    padding-bottom: 14px;
+    width: calc(100% - 20px);
+    padding-bottom: 10px;
   }
 
   .composer {
-    min-height: 126px;
+    min-height: 122px;
+    padding: 12px;
   }
 
   .composer-footer {
     align-items: flex-start;
     flex-direction: column;
+    gap: 10px;
   }
 
   .composer-tools {
@@ -1005,6 +1099,7 @@ button {
 
   .composer-actions {
     width: 100%;
+    margin-left: 0;
   }
 
   .composer-model-select {
@@ -1012,6 +1107,27 @@ button {
     width: auto;
     max-width: none;
     min-width: 0;
+  }
+}
+
+@media (max-width: 760px) {
+  .app-layout {
+    grid-template-columns: 52px minmax(0, 1fr);
+    grid-template-areas: "rail chat";
+  }
+
+  .session-sidebar {
+    display: none;
+  }
+
+  .approval-backdrop {
+    align-items: stretch;
+    padding: 12px;
+  }
+
+  .approval-dialog {
+    width: 100%;
+    max-height: calc(100vh - 24px);
   }
 }
 

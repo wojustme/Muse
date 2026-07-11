@@ -223,6 +223,41 @@ export const modelRuns = mysqlTable(
   }),
 );
 
+// tool_calls：记录模型触发的工具调用与执行结果，后续 MCP/审批流复用这张表。
+export const toolCalls = mysqlTable(
+  "tool_calls",
+  {
+    id: char("id", { length: 36 }).primaryKey(),
+    modelRunId: char("model_run_id", { length: 36 }).notNull(),
+    sessionId: char("session_id", { length: 36 }).notNull(),
+    userId: char("user_id", { length: 36 }).notNull(),
+    toolCallId: varchar("tool_call_id", { length: 128 }).notNull(),
+    toolName: varchar("tool_name", { length: 128 }).notNull(),
+    toolSource: varchar("tool_source", { length: 32 }).notNull(),
+    riskLevel: varchar("risk_level", { length: 32 }).notNull(),
+    inputJson: longtext("input_json").notNull(),
+    outputJson: longtext("output_json"),
+    status: varchar("status", { length: 32 }).notNull().default("running"),
+    requiresApproval: boolean("requires_approval").notNull().default(false),
+    errorMessage: text("error_message"),
+    startedAt: dateTime("started_at").notNull(),
+    completedAt: dateTime("completed_at"),
+    createdAt: dateTime("created_at").notNull(),
+  },
+  (t) => ({
+    modelRunIdx: index("idx_tool_calls_model_run").on(t.modelRunId),
+    sessionCreatedIdx: index("idx_tool_calls_session_created").on(
+      t.sessionId,
+      t.createdAt,
+    ),
+    userCreatedIdx: index("idx_tool_calls_user_created").on(
+      t.userId,
+      t.createdAt,
+    ),
+    statusIdx: index("idx_tool_calls_status").on(t.status),
+  }),
+);
+
 export type UserRow = typeof users.$inferSelect;
 export type UserIdentityRow = typeof userIdentities.$inferSelect;
 export type AuthSessionRow = typeof authSessions.$inferSelect;
@@ -232,3 +267,4 @@ export type UserAiModelRow = typeof userAiModels.$inferSelect;
 export type ChatSessionRow = typeof chatSessions.$inferSelect;
 export type ChatMessageRow = typeof chatMessages.$inferSelect;
 export type ModelRunRow = typeof modelRuns.$inferSelect;
+export type ToolCallRow = typeof toolCalls.$inferSelect;

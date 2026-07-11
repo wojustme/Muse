@@ -653,6 +653,11 @@ button {
   outline: none;
 }
 
+.model-select select:disabled {
+  cursor: not-allowed;
+  color: #667085;
+}
+
 .chat-canvas {
   position: relative;
   display: grid;

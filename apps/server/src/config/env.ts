@@ -30,6 +30,23 @@ const envSchema = z.object({
     .optional()
     .transform((value) => value === "true" || value === "1"),
   AUTH_DEV_MOCK_NAME: z.string().default("Muse Dev User"),
+
+  // 本地 bash 工具默认关闭。只应在可信本机开发环境中开启。
+  MUSE_LOCAL_BASH_ENABLED: z
+    .enum(["true", "false", "1", "0"])
+    .optional()
+    .transform((value) => value === "true" || value === "1"),
+  MUSE_LOCAL_BASH_ALLOWED_ROOTS: z
+    .string()
+    .default(
+      "/Users/bytedance/codes/my/Muse,/Users/bytedance/Downloads,/private/tmp",
+    ),
+  MUSE_LOCAL_BASH_TIMEOUT_MS: z.coerce.number().int().positive().default(8000),
+  MUSE_LOCAL_BASH_MAX_OUTPUT_CHARS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(12000),
 });
 
 export const env = envSchema.parse(process.env);
