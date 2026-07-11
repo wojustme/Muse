@@ -8,6 +8,7 @@
     "dev": "pnpm --parallel --filter @muse/server --filter @muse/desktop run dev:app",
     "dev:desktop": "pnpm --filter @muse/desktop run dev:app",
     "dev:desktop:web": "pnpm --filter @muse/desktop run dev:web",
+    "dev:web": "pnpm --filter @muse/web run dev",
     "dev:server": "pnpm --filter @muse/server run dev",
     "build": "pnpm -r --sort run build",
     "typecheck": "pnpm -r --sort run typecheck",

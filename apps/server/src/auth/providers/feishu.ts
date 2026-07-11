@@ -117,10 +117,4 @@ export class FeishuAdapter implements AuthProviderAdapter {
       raw: body,
     };
   }
-
-  buildIdentityKey(profile: NormalizedProfile): string {
-    const tenant = profile.tenantId ?? "";
-    const anchor = profile.unionId ?? profile.providerUid;
-    return `feishu:${tenant}:${anchor}`;
-  }
 }

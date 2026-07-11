@@ -629,7 +629,7 @@ function ChatApp({
         </div>
         <div className="window-title">
           <Monitor aria-hidden="true" size={14} strokeWidth={2.2} />
-          <span>Muse Desktop</span>
+          <span>Muse Web</span>
         </div>
         <div className="window-status">
           <span className="status-dot" />
@@ -936,7 +936,9 @@ function ChatApp({
             {messages.slice(-4).length ? (
               messages.slice(-4).map((message) => (
                 <div className="activity-item" key={message.id}>
-                  <strong>{message.role === "assistant" ? "Muse" : "You"}</strong>
+                  <strong>
+                    {message.role === "assistant" ? "Muse" : "You"}
+                  </strong>
                   <span>{message.text}</span>
                 </div>
               ))

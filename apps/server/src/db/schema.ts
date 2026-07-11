@@ -1,183 +1,234 @@
-import { index, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import {
+  boolean,
+  char,
+  datetime,
+  index,
+  int,
+  longtext,
+  mysqlTable,
+  primaryKey,
+  text,
+  uniqueIndex,
+  varchar,
+} from "drizzle-orm/mysql-core";
 
-// 时间统一存 ISO datetime 字符串（对齐 packages/shared 的 z.string().datetime()）。
-const isoNow = () => new Date().toISOString();
+const dateTime = (name: string) => datetime(name, { mode: "date", fsp: 3 });
 
 // users：Muse 内部账号本体（一个"人"）。业务数据只外键到这里。
-export const users = sqliteTable(
+export const users = mysqlTable(
   "users",
   {
-    id: text("id").primaryKey(),
-    displayName: text("display_name"),
+    id: char("id", { length: 36 }).primaryKey(),
+    displayName: varchar("display_name", { length: 255 }),
     avatarUrl: text("avatar_url"),
-    email: text("email"),
-    phone: text("phone"),
-    status: text("status").notNull().default("active"),
-    metadata: text("metadata").notNull().default("{}"),
-    createdAt: text("created_at").notNull().$defaultFn(isoNow),
-    updatedAt: text("updated_at").notNull().$defaultFn(isoNow),
-    lastLoginAt: text("last_login_at"),
+    email: varchar("email", { length: 320 }),
+    status: varchar("status", { length: 32 }).notNull().default("active"),
+    createdAt: dateTime("created_at").notNull(),
+    updatedAt: dateTime("updated_at").notNull(),
+    lastLoginAt: dateTime("last_login_at"),
   },
   (t) => ({
     statusIdx: index("idx_users_status").on(t.status),
   }),
 );
 
-// auth_identities：第三方登录身份。一个 user 可绑定多个身份。
-// identity_key UNIQUE 保证一个外部身份只归属一个 Muse 账号（绑定模型核心约束）。
-export const authIdentities = sqliteTable(
-  "auth_identities",
+// user_identities：第三方登录身份。一个 user 可绑定多个身份。
+// provider + tenant + provider_user_id UNIQUE 保证一个外部身份只归属一个 Muse 账号。
+export const userIdentities = mysqlTable(
+  "user_identities",
   {
-    id: text("id").primaryKey(),
-    userId: text("user_id")
+    id: char("id", { length: 36 }).primaryKey(),
+    userId: char("user_id", { length: 36 }).notNull(),
+    provider: varchar("provider", { length: 32 }).notNull(),
+    providerUserId: varchar("provider_user_id", { length: 255 }).notNull(),
+    providerUnionId: varchar("provider_union_id", { length: 255 }),
+    providerTenantId: varchar("provider_tenant_id", { length: 255 })
       .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    identityKey: text("identity_key").notNull(),
-    provider: text("provider").notNull(),
-    providerUserId: text("provider_user_id").notNull(),
-    providerUnionId: text("provider_union_id"),
-    providerTenantId: text("provider_tenant_id").notNull().default(""),
-    providerOpenId: text("provider_open_id"),
-    displayName: text("display_name"),
+      .default(""),
+    displayName: varchar("display_name", { length: 255 }),
     avatarUrl: text("avatar_url"),
-    rawProfile: text("raw_profile").notNull().default("{}"),
-    createdAt: text("created_at").notNull().$defaultFn(isoNow),
-    updatedAt: text("updated_at").notNull().$defaultFn(isoNow),
-    lastUsedAt: text("last_used_at"),
+    rawProfile: longtext("raw_profile"),
+    createdAt: dateTime("created_at").notNull(),
+    updatedAt: dateTime("updated_at").notNull(),
+    lastUsedAt: dateTime("last_used_at"),
   },
   (t) => ({
-    identityKeyUq: uniqueIndex("uq_auth_identities_key").on(t.identityKey),
-    userIdx: index("idx_auth_identities_user").on(t.userId),
-    providerIdx: index("idx_auth_identities_provider").on(t.provider),
+    providerUserUq: uniqueIndex("uq_user_identities_provider_user").on(
+      t.provider,
+      t.providerTenantId,
+      t.providerUserId,
+    ),
+    userIdx: index("idx_user_identities_user").on(t.userId),
   }),
 );
 
-// auth_sessions：App 登录态。不透明 session token 只存哈希，可按设备吊销。
-export const authSessions = sqliteTable(
+// auth_sessions：App 登录态。不透明 session token 只存哈希，token_hash 直接作为主键。
+export const authSessions = mysqlTable(
   "auth_sessions",
   {
-    id: text("id").primaryKey(),
-    userId: text("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    identityId: text("identity_id").references(() => authIdentities.id, {
-      onDelete: "set null",
-    }),
-    tokenHash: text("token_hash").notNull(),
-    clientPlatform: text("client_platform"),
-    deviceLabel: text("device_label"),
-    status: text("status").notNull().default("active"),
-    metadata: text("metadata").notNull().default("{}"),
-    createdAt: text("created_at").notNull().$defaultFn(isoNow),
-    updatedAt: text("updated_at").notNull().$defaultFn(isoNow),
-    expiresAt: text("expires_at").notNull(),
-    revokedAt: text("revoked_at"),
+    tokenHash: char("token_hash", { length: 64 }).primaryKey(),
+    userId: char("user_id", { length: 36 }).notNull(),
+    status: varchar("status", { length: 32 }).notNull().default("active"),
+    expiresAt: dateTime("expires_at").notNull(),
+    createdAt: dateTime("created_at").notNull(),
+    updatedAt: dateTime("updated_at").notNull(),
   },
   (t) => ({
-    tokenUq: uniqueIndex("uq_auth_sessions_token").on(t.tokenHash),
     userIdx: index("idx_auth_sessions_user").on(t.userId),
-    statusIdx: index("idx_auth_sessions_status").on(t.status),
+    expiresAtIdx: index("idx_auth_sessions_expires_at").on(t.expiresAt),
   }),
 );
 
-// login_challenges：扫码登录中间态（服务端中转 + 客户端轮询）。
-export const loginChallenges = sqliteTable(
-  "login_challenges",
+// system_configs：系统级 key-value 配置，value 使用 JSON 字符串。
+export const systemConfigs = mysqlTable("system_configs", {
+  configKey: varchar("config_key", { length: 128 }).primaryKey(),
+  configValue: longtext("config_value").notNull(),
+  description: varchar("description", { length: 255 }),
+  createdAt: dateTime("created_at").notNull(),
+  updatedAt: dateTime("updated_at").notNull(),
+});
+
+// ai_models：现阶段的模型目录与调用配置。/api/models 只返回非敏感字段。
+export const aiModels = mysqlTable(
+  "ai_models",
   {
-    state: text("state").primaryKey(),
-    provider: text("provider").notNull(),
-    clientPlatform: text("client_platform").notNull(),
-    codeVerifier: text("code_verifier"),
-    status: text("status").notNull().default("pending"),
-    userId: text("user_id").references(() => users.id, {
-      onDelete: "cascade",
-    }),
-    sessionTokenHash: text("session_token_hash"),
-    errorCode: text("error_code"),
-    metadata: text("metadata").notNull().default("{}"),
-    createdAt: text("created_at").notNull().$defaultFn(isoNow),
-    expiresAt: text("expires_at").notNull(),
-    consumedAt: text("consumed_at"),
+    id: char("id", { length: 36 }).primaryKey(),
+    provider: varchar("provider", { length: 64 }).notNull(),
+    modelName: varchar("model_name", { length: 128 }).notNull(),
+    displayName: varchar("display_name", { length: 128 }).notNull(),
+    apiKey: text("api_key"),
+    baseUrl: varchar("base_url", { length: 512 }),
+    enabled: boolean("enabled").notNull().default(true),
+    createdAt: dateTime("created_at").notNull(),
+    updatedAt: dateTime("updated_at").notNull(),
   },
   (t) => ({
-    statusIdx: index("idx_login_challenges_status").on(t.status),
-    expiresIdx: index("idx_login_challenges_expires_at").on(t.expiresAt),
+    providerModelUq: uniqueIndex("uq_ai_models_provider_model").on(
+      t.provider,
+      t.modelName,
+    ),
+    enabledIdx: index("idx_ai_models_enabled").on(t.enabled),
+  }),
+);
+
+// user_ai_models：用户可使用的模型授权关系。行存在即表示该用户可使用该模型。
+export const userAiModels = mysqlTable(
+  "user_ai_models",
+  {
+    userId: char("user_id", { length: 36 }).notNull(),
+    aiModelId: char("ai_model_id", { length: 36 }).notNull(),
+    createdAt: dateTime("created_at").notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({
+      name: "pk_user_ai_models",
+      columns: [t.userId, t.aiModelId],
+    }),
+    aiModelIdx: index("idx_user_ai_models_ai_model").on(t.aiModelId),
+  }),
+);
+
+// chat_sessions：用户的一条对话会话摘要。
+export const chatSessions = mysqlTable(
+  "chat_sessions",
+  {
+    id: char("id", { length: 36 }).primaryKey(),
+    userId: char("user_id", { length: 36 }).notNull(),
+    title: varchar("title", { length: 255 }).notNull(),
+    modelProvider: varchar("model_provider", { length: 64 }),
+    modelName: varchar("model_name", { length: 128 }),
+    aiModelId: char("ai_model_id", { length: 36 }),
+    status: varchar("status", { length: 32 }).notNull().default("active"),
+    pinned: boolean("pinned").notNull().default(false),
+    messageCount: int("message_count").notNull().default(0),
+    lastMessagePreview: varchar("last_message_preview", { length: 512 }),
+    lastMessageAt: dateTime("last_message_at"),
+    createdAt: dateTime("created_at").notNull(),
+    updatedAt: dateTime("updated_at").notNull(),
+  },
+  (t) => ({
+    userStatusUpdatedIdx: index("idx_chat_sessions_user_status_updated").on(
+      t.userId,
+      t.status,
+      t.updatedAt,
+    ),
+    userPinnedUpdatedIdx: index("idx_chat_sessions_user_pinned_updated").on(
+      t.userId,
+      t.pinned,
+      t.updatedAt,
+    ),
+  }),
+);
+
+// chat_messages：会话内消息历史。content 是便于检索展示的纯文本，parts 保留结构化消息。
+export const chatMessages = mysqlTable(
+  "chat_messages",
+  {
+    id: char("id", { length: 36 }).primaryKey(),
+    sessionId: char("session_id", { length: 36 }).notNull(),
+    userId: char("user_id", { length: 36 }).notNull(),
+    role: varchar("role", { length: 32 }).notNull(),
+    content: longtext("content").notNull(),
+    parts: longtext("parts"),
+    modelProvider: varchar("model_provider", { length: 64 }),
+    modelName: varchar("model_name", { length: 128 }),
+    aiModelId: char("ai_model_id", { length: 36 }),
+    status: varchar("status", { length: 32 }).notNull().default("completed"),
+    errorMessage: text("error_message"),
+    createdAt: dateTime("created_at").notNull(),
+    updatedAt: dateTime("updated_at").notNull(),
+  },
+  (t) => ({
+    sessionCreatedIdx: index("idx_chat_messages_session_created").on(
+      t.sessionId,
+      t.createdAt,
+    ),
+    userCreatedIdx: index("idx_chat_messages_user_created").on(
+      t.userId,
+      t.createdAt,
+    ),
+  }),
+);
+
+// model_runs：一次模型调用记录。当前先记录 placeholder 调用，后续接真实模型和用量。
+export const modelRuns = mysqlTable(
+  "model_runs",
+  {
+    id: char("id", { length: 36 }).primaryKey(),
+    sessionId: char("session_id", { length: 36 }).notNull(),
+    userId: char("user_id", { length: 36 }).notNull(),
+    requestMessageId: char("request_message_id", { length: 36 }),
+    responseMessageId: char("response_message_id", { length: 36 }),
+    aiModelId: char("ai_model_id", { length: 36 }),
+    provider: varchar("provider", { length: 64 }).notNull(),
+    modelName: varchar("model_name", { length: 128 }).notNull(),
+    status: varchar("status", { length: 32 }).notNull().default("pending"),
+    promptTokens: int("prompt_tokens"),
+    completionTokens: int("completion_tokens"),
+    totalTokens: int("total_tokens"),
+    errorMessage: text("error_message"),
+    startedAt: dateTime("started_at").notNull(),
+    completedAt: dateTime("completed_at"),
+    createdAt: dateTime("created_at").notNull(),
+  },
+  (t) => ({
+    sessionCreatedIdx: index("idx_model_runs_session_created").on(
+      t.sessionId,
+      t.createdAt,
+    ),
+    userCreatedIdx: index("idx_model_runs_user_created").on(
+      t.userId,
+      t.createdAt,
+    ),
   }),
 );
 
 export type UserRow = typeof users.$inferSelect;
-export type AuthIdentityRow = typeof authIdentities.$inferSelect;
+export type UserIdentityRow = typeof userIdentities.$inferSelect;
 export type AuthSessionRow = typeof authSessions.$inferSelect;
-export type LoginChallengeRow = typeof loginChallenges.$inferSelect;
-
-// 供建库使用的原始 DDL。第一阶段用本地 SQLite，随应用启动时执行一次。
-export const CREATE_TABLES_SQL = `
-CREATE TABLE IF NOT EXISTS users (
-  id TEXT PRIMARY KEY,
-  display_name TEXT,
-  avatar_url TEXT,
-  email TEXT,
-  phone TEXT,
-  status TEXT NOT NULL DEFAULT 'active',
-  metadata TEXT NOT NULL DEFAULT '{}',
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  last_login_at TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_users_status ON users(status);
-
-CREATE TABLE IF NOT EXISTS auth_identities (
-  id TEXT PRIMARY KEY,
-  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  identity_key TEXT NOT NULL,
-  provider TEXT NOT NULL,
-  provider_user_id TEXT NOT NULL,
-  provider_union_id TEXT,
-  provider_tenant_id TEXT NOT NULL DEFAULT '',
-  provider_open_id TEXT,
-  display_name TEXT,
-  avatar_url TEXT,
-  raw_profile TEXT NOT NULL DEFAULT '{}',
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  last_used_at TEXT
-);
-CREATE UNIQUE INDEX IF NOT EXISTS uq_auth_identities_key ON auth_identities(identity_key);
-CREATE INDEX IF NOT EXISTS idx_auth_identities_user ON auth_identities(user_id);
-CREATE INDEX IF NOT EXISTS idx_auth_identities_provider ON auth_identities(provider);
-
-CREATE TABLE IF NOT EXISTS auth_sessions (
-  id TEXT PRIMARY KEY,
-  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  identity_id TEXT REFERENCES auth_identities(id) ON DELETE SET NULL,
-  token_hash TEXT NOT NULL,
-  client_platform TEXT,
-  device_label TEXT,
-  status TEXT NOT NULL DEFAULT 'active',
-  metadata TEXT NOT NULL DEFAULT '{}',
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  expires_at TEXT NOT NULL,
-  revoked_at TEXT
-);
-CREATE UNIQUE INDEX IF NOT EXISTS uq_auth_sessions_token ON auth_sessions(token_hash);
-CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON auth_sessions(user_id);
-CREATE INDEX IF NOT EXISTS idx_auth_sessions_status ON auth_sessions(status);
-
-CREATE TABLE IF NOT EXISTS login_challenges (
-  state TEXT PRIMARY KEY,
-  provider TEXT NOT NULL,
-  client_platform TEXT NOT NULL,
-  code_verifier TEXT,
-  status TEXT NOT NULL DEFAULT 'pending',
-  user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
-  session_token_hash TEXT,
-  error_code TEXT,
-  metadata TEXT NOT NULL DEFAULT '{}',
-  created_at TEXT NOT NULL,
-  expires_at TEXT NOT NULL,
-  consumed_at TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_login_challenges_status ON login_challenges(status);
-CREATE INDEX IF NOT EXISTS idx_login_challenges_expires_at ON login_challenges(expires_at);
-`;
+export type SystemConfigRow = typeof systemConfigs.$inferSelect;
+export type AiModelRow = typeof aiModels.$inferSelect;
+export type UserAiModelRow = typeof userAiModels.$inferSelect;
+export type ChatSessionRow = typeof chatSessions.$inferSelect;
+export type ChatMessageRow = typeof chatMessages.$inferSelect;
+export type ModelRunRow = typeof modelRuns.$inferSelect;

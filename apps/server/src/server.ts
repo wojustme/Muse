@@ -2,16 +2,14 @@ import cors from "@fastify/cors";
 import Fastify from "fastify";
 import { registerAuthProviders } from "./auth/registry.js";
 import { env } from "./config/env.js";
-import { initDatabase } from "./db/client.js";
 import { authRoutes } from "./routes/auth.js";
 import { chatRoutes } from "./routes/chat.js";
 import { healthRoutes } from "./routes/health.js";
 import { modelRoutes } from "./routes/models.js";
 import { sessionRoutes } from "./routes/sessions.js";
 
-// 建表（本地 SQLite）+ 按接入顺序注册已配置的 provider。
-initDatabase();
-registerAuthProviders();
+// 按接入顺序注册已配置的第三方登录 provider。
+await registerAuthProviders();
 
 const app = Fastify({
   logger: true,

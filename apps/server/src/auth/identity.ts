@@ -1,7 +1,7 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { AuthProvider } from "@muse/shared";
 import { db } from "../db/client.js";
-import { authIdentities, users } from "../db/schema.js";
+import { userIdentities, users } from "../db/schema.js";
 import type { NormalizedProfile } from "./provider.js";
 
 // 绑定冲突：该第三方身份已属于另一个账号。
@@ -22,17 +22,23 @@ type ResolveResult = {
 // currentUserId 不为空 = 已登录态下的绑定请求。
 export async function resolveIdentity(input: {
   provider: AuthProvider;
-  identityKey: string;
   profile: NormalizedProfile;
   currentUserId?: string | null;
 }): Promise<ResolveResult> {
-  const { provider, identityKey, profile, currentUserId } = input;
-  const now = new Date().toISOString();
+  const { provider, profile, currentUserId } = input;
+  const now = new Date();
+  const providerTenantId = profile.tenantId ?? "";
 
   const [existing] = await db
     .select()
-    .from(authIdentities)
-    .where(eq(authIdentities.identityKey, identityKey))
+    .from(userIdentities)
+    .where(
+      and(
+        eq(userIdentities.provider, provider),
+        eq(userIdentities.providerTenantId, providerTenantId),
+        eq(userIdentities.providerUserId, profile.providerUid),
+      ),
+    )
     .limit(1);
 
   // 命中：更新资料后登入对应账号。
@@ -43,7 +49,7 @@ export async function resolveIdentity(input: {
     }
 
     await db
-      .update(authIdentities)
+      .update(userIdentities)
       .set({
         displayName: profile.displayName ?? existing.displayName,
         avatarUrl: profile.avatarUrl ?? existing.avatarUrl,
@@ -52,7 +58,7 @@ export async function resolveIdentity(input: {
         updatedAt: now,
         lastUsedAt: now,
       })
-      .where(eq(authIdentities.id, existing.id));
+      .where(eq(userIdentities.id, existing.id));
 
     return {
       userId: existing.userId,
@@ -66,7 +72,6 @@ export async function resolveIdentity(input: {
     const identityId = await insertIdentity({
       userId: currentUserId,
       provider,
-      identityKey,
       profile,
       now,
     });
@@ -88,7 +93,6 @@ export async function resolveIdentity(input: {
   const identityId = await insertIdentity({
     userId,
     provider,
-    identityKey,
     profile,
     now,
   });
@@ -99,17 +103,15 @@ export async function resolveIdentity(input: {
 async function insertIdentity(input: {
   userId: string;
   provider: AuthProvider;
-  identityKey: string;
   profile: NormalizedProfile;
-  now: string;
+  now: Date;
 }): Promise<string> {
-  const { userId, provider, identityKey, profile, now } = input;
+  const { userId, provider, profile, now } = input;
   const identityId = crypto.randomUUID();
 
-  await db.insert(authIdentities).values({
+  await db.insert(userIdentities).values({
     id: identityId,
     userId,
-    identityKey,
     provider,
     providerUserId: profile.providerUid,
     providerUnionId: profile.unionId ?? null,

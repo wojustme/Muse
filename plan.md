@@ -146,14 +146,15 @@ Tauri Native Layer
 Muse/
   apps/
     desktop/            Tauri 桌面客户端，macOS + Windows 共用
+    web/                浏览器 Web 客户端
     server/             Node.js 后端服务
     mobile/             未来移动端，iOS + Android 共用
     miniapp/            未来微信小程序客户端
 
   packages/
     shared/             全端共享类型、zod schemas、常量
+    api-client/         多客户端共享 API client
     model-router/       后端模型路由，OpenAI / DeepSeek / GLM 适配
-    api-client/         可选，多客户端共享 API client
     session-store/      可选，session/message 存储抽象
     agent-runtime/      可选，轻量 agent loop、tools、MCP bridge
 
@@ -185,12 +186,13 @@ packages/
 目录边界：
 
 - `apps/desktop`: 用户可见的桌面客户端，包含 React 前端和 Tauri Rust native 层。
+- `apps/web`: 浏览器 Web 客户端，复用桌面端的大部分 React UI 和 API client，平台差异集中在登录跳转、浏览器存储和后续 Web 路由。
 - `apps/server`: Node.js 后端，负责 Chat API、session 读写、模型调用、streaming、tool calling 和后续 agent runtime。
 - `apps/mobile`: 后续 iOS 和 Android 客户端入口，建议 React Native / Expo 起步，或继续评估 Tauri mobile。
 - `apps/miniapp`: 后续微信小程序客户端入口，可选 Taro + React + TypeScript，或原生小程序。
 - `packages/shared`: 桌面端、移动端、小程序、后端都能复用的类型、schema 和常量。
 - `packages/model-router`: 后端侧模型 provider 适配层，不直接放到客户端。
-- `packages/api-client`: 后续多客户端共享 API 调用时再抽，微信小程序需要单独适配 `wx.request`、`wx.connectSocket` 等 transport。
+- `packages/api-client`: 多客户端共享 API 调用与登录态请求封装；微信小程序后续需要单独适配 `wx.request`、`wx.connectSocket` 等 transport。
 - `packages/session-store`: session/message 存储逻辑稳定后，从 `apps/server` 中抽出。
 - `packages/agent-runtime`: tool calling、MCP、本机工具和 Agent loop 复杂后再抽出。
 

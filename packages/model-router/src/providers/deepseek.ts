@@ -13,7 +13,7 @@ export function createDeepSeekProvider(
   return {
     id: "deepseek",
     name: "DeepSeek",
-    createModel: (modelName) => deepseek(modelName),
+    createModel: (modelName) => deepseek.chat(modelName),
     capabilities: {
       ...defaultCapabilities,
       tools: true,

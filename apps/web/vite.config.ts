@@ -5,7 +5,7 @@ import { defineConfig } from "vite";
 export default defineConfig({
   plugins: [react()],
   clearScreen: false,
-  envPrefix: ["VITE_", "TAURI_"],
+  envPrefix: ["VITE_"],
   resolve: {
     alias: {
       "@muse/api-client": fileURLToPath(
@@ -15,7 +15,7 @@ export default defineConfig({
   },
   server: {
     host: "127.0.0.1",
-    port: 1420,
+    port: 1430,
     strictPort: true,
   },
   build: {

@@ -39,8 +39,6 @@ export interface AuthProviderAdapter {
   buildAuthUrl(input: BuildAuthUrlInput): string;
   exchangeToken(input: ExchangeTokenInput): Promise<ProviderToken>;
   fetchUserInfo(token: ProviderToken): Promise<NormalizedProfile>;
-  // identity_key：unionId 优先，见 docs/auth-implementation-plan.md 第 3 节。
-  buildIdentityKey(profile: NormalizedProfile): string;
 }
 
 const registry = new Map<AuthProvider, AuthProviderAdapter>();

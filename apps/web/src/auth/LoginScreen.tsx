@@ -1,4 +1,3 @@
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { ExternalLink, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AuthUser } from "@muse/shared";
@@ -16,22 +15,28 @@ const canUseDevLogin = import.meta.env.DEV;
 // idle: 正在发起登录；ready: 可点击登录；waiting: 已拉起浏览器并轮询；error: 失败。
 type Phase = "idle" | "ready" | "waiting" | "error";
 
-async function openExternalUrl(url: string): Promise<void> {
-  try {
-    await openUrl(url);
+function openBlankAuthWindow(): Window {
+  const authWindow = window.open("about:blank", "_blank");
+  if (!authWindow) {
+    throw new Error("浏览器阻止了弹窗，请允许弹窗后重试");
+  }
+  return authWindow;
+}
+
+async function openExternalUrl(url: string, authWindow?: Window): Promise<void> {
+  if (authWindow && !authWindow.closed) {
+    authWindow.location.href = url;
     return;
-  } catch (error) {
-    console.warn("Tauri opener failed, falling back to window.open", error);
   }
 
   const opened = window.open(url, "_blank");
   if (!opened) {
-    throw new Error("无法打开系统浏览器，请稍后重试");
+    throw new Error("浏览器阻止了弹窗，请允许弹窗后重试");
   }
 }
 
-// 飞书浏览器授权登录页（macOS 桌面）。
-// 桌面 OAuth 标准流：点击登录 -> 系统浏览器完成授权 -> 后台轮询 login_challenges 自动登录。
+// 飞书浏览器授权登录页（Web）。
+// Web 首版复用 challenge + 轮询流程，后续可切换为标准 redirect + cookie/session。
 // 不使用手机扫码：授权回调指向 http://127.0.0.1，在手机上不可达。
 export function LoginScreen({
   onAuthenticated,
@@ -73,15 +78,18 @@ export function LoginScreen({
 
   // 点击后创建 challenge 并拉起系统浏览器授权，随后切到 waiting 开始轮询。
   const beginLogin = useCallback(async () => {
+    let authWindow: Window | undefined;
     try {
       stopPolling();
       setPhase("idle");
       setErrorMsg("");
+      authWindow = challenge ? undefined : openBlankAuthWindow();
       const activeChallenge = challenge ?? (await startFeishuChallenge());
       setChallenge(activeChallenge);
-      await openExternalUrl(activeChallenge.authUrl);
+      await openExternalUrl(activeChallenge.authUrl, authWindow);
       setPhase("waiting");
     } catch (error) {
+      authWindow?.close();
       setErrorMsg(error instanceof Error ? error.message : "无法打开浏览器");
       setPhase("error");
     }

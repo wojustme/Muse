@@ -18,6 +18,8 @@
     "paths": {
       "@muse/shared": ["packages/shared/src/index.ts"],
       "@muse/shared/*": ["packages/shared/src/*"],
+      "@muse/api-client": ["packages/api-client/src/index.ts"],
+      "@muse/api-client/*": ["packages/api-client/src/*"],
       "@muse/model-router": ["packages/model-router/src/index.ts"],
       "@muse/model-router/*": ["packages/model-router/src/*"]
     }

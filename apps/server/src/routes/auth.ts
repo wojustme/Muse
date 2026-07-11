@@ -1,9 +1,11 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import {
   authChallengeRequestSchema,
   authProviderSchema,
+  type AuthProvider,
   type AuthStatusResponse,
+  type ClientPlatform,
 } from "@muse/shared";
 import { env } from "../config/env.js";
 import { generatePkce, generateState } from "../auth/challenge.js";
@@ -16,24 +18,141 @@ import { getAuthProvider, isAuthProviderEnabled } from "../auth/provider.js";
 import {
   buildAuthUser,
   createSession,
-  hashToken,
   revokeSession,
 } from "../auth/session.js";
 import { db } from "../db/client.js";
-import { loginChallenges } from "../db/schema.js";
+import { userIdentities, users } from "../db/schema.js";
 
-// 回调页：无 UI，只提示用户回到 App。Web 端后续可替换为 302。
-function renderCallbackPage(message: string): string {
-  return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Muse</title><style>body{font-family:-apple-system,system-ui,sans-serif;display:flex;height:100vh;margin:0;align-items:center;justify-content:center;color:#333;background:#f7f7f8}main{text-align:center}</style></head><body><main><h2>Muse</h2><p>${message}</p></main></body></html>`;
+type ChallengeState =
+  | "pending"
+  | "authorized"
+  | "failed"
+  | "consumed"
+  | "expired";
+
+type LoginChallenge = {
+  state: string;
+  provider: AuthProvider;
+  clientPlatform: ClientPlatform;
+  codeVerifier?: string;
+  status: ChallengeState;
+  userId?: string;
+  errorCode?: string;
+  sessionToken?: string;
+  expiresAt: Date;
+};
+
+const loginChallenges = new Map<string, LoginChallenge>();
+
+function cleanupExpiredChallenges() {
+  const now = Date.now();
+  for (const [state, challenge] of loginChallenges) {
+    if (challenge.expiresAt.getTime() <= now || challenge.status === "consumed") {
+      loginChallenges.delete(state);
+    }
+  }
+}
+
+function escapeHTML(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function renderCallbackPage(input: {
+  message: string;
+  status: "success" | "failed";
+}): string {
+  const frontendURL = env.FRONTEND_BASE_URL;
+  const safeMessage = escapeHTML(input.message);
+  const payload = JSON.stringify({
+    type: "muse-auth-callback",
+    status: input.status,
+  });
+
+  return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Muse</title><style>body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;display:flex;height:100vh;margin:0;align-items:center;justify-content:center;color:#1f2937;background:#f4f6f8}main{display:grid;gap:14px;width:min(360px,calc(100% - 48px));padding:28px;border:1px solid #dce3eb;border-radius:12px;background:#fff;box-shadow:0 12px 32px rgb(17 24 39 / 10%);text-align:center}h2,p{margin:0}h2{font-size:20px}p{color:#667085;font-size:14px;line-height:1.6}a{display:inline-flex;align-items:center;justify-content:center;height:38px;padding:0 16px;border-radius:8px;color:#fff;background:#14532d;text-decoration:none;font-size:14px;font-weight:700}</style></head><body><main><h2>Muse</h2><p>${safeMessage}</p><a href="${frontendURL}">返回 Muse</a></main><script>const target=${JSON.stringify(frontendURL)};try{if(window.opener){window.opener.postMessage(${payload},target);window.close();}}catch(error){}setTimeout(()=>{window.location.replace(target);},1200);</script></body></html>`;
 }
 
 export async function authRoutes(app: FastifyInstance) {
-  // 发起扫码/授权：建 login_challenges，返回 authUrl + state。
+  app.post("/auth/dev", async (request, reply) => {
+    if (!env.AUTH_DEV_MOCK) {
+      return reply.status(404).send({ error: "Dev auth is not enabled" });
+    }
+
+    const now = new Date();
+    const [existingIdentity] = await db
+      .select()
+      .from(userIdentities)
+      .where(
+        and(
+          eq(userIdentities.provider, "feishu"),
+          eq(userIdentities.providerTenantId, "local"),
+          eq(userIdentities.providerUserId, "dev-local"),
+        ),
+      )
+      .limit(1);
+
+    let userId = existingIdentity?.userId;
+
+    if (!userId) {
+      userId = crypto.randomUUID();
+
+      await db.insert(users).values({
+        id: userId,
+        displayName: env.AUTH_DEV_MOCK_NAME,
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+        lastLoginAt: now,
+      });
+
+      await db.insert(userIdentities).values({
+        id: crypto.randomUUID(),
+        userId,
+        provider: "feishu",
+        providerUserId: "dev-local",
+        providerTenantId: "local",
+        displayName: env.AUTH_DEV_MOCK_NAME,
+        rawProfile: JSON.stringify({ source: "AUTH_DEV_MOCK" }),
+        createdAt: now,
+        updatedAt: now,
+        lastUsedAt: now,
+      });
+    } else {
+      await db
+        .update(users)
+        .set({
+          displayName: env.AUTH_DEV_MOCK_NAME,
+          updatedAt: now,
+          lastLoginAt: now,
+        })
+        .where(eq(users.id, userId));
+    }
+
+    const session = await createSession({
+      userId,
+      clientPlatform: "web",
+    });
+    const user = await buildAuthUser(userId);
+
+    return reply.send({
+      token: session.token,
+      expiresAt: session.expiresAt,
+      user,
+    });
+  });
+
+  // 发起扫码/授权：创建进程内短 TTL challenge，返回 authUrl + state。
   // 携带有效 bearer 时视为"绑定"（把新 provider 绑到当前账号）。
   app.post(
     "/auth/:provider/challenge",
     { preHandler: optionalAuth },
     async (request, reply) => {
+      cleanupExpiredChallenges();
+
       const providerParsed = authProviderSchema.safeParse(
         (request.params as { provider: string }).provider,
       );
@@ -71,59 +190,75 @@ export async function authRoutes(app: FastifyInstance) {
       }
 
       const authUrl = adapter.buildAuthUrl({ state, redirectUri, codeChallenge });
-      const expiresAt = new Date(
-        Date.now() + env.LOGIN_CHALLENGE_TTL_SECONDS * 1000,
-      ).toISOString();
+      const expiresAt = new Date(Date.now() + env.LOGIN_CHALLENGE_TTL_SECONDS * 1000);
 
-      await db.insert(loginChallenges).values({
+      loginChallenges.set(state, {
         state,
         provider,
         clientPlatform: bodyParsed.data.platform,
-        codeVerifier: codeVerifier ?? null,
+        codeVerifier,
         status: "pending",
         // 绑定模式：把当前登录用户带到 callback。
-        userId: request.userId ?? null,
+        userId: request.userId,
         expiresAt,
       });
 
-      return reply.send({ state, authUrl, expiresAt });
+      return reply.send({ state, authUrl, expiresAt: expiresAt.toISOString() });
     },
   );
 
-  // provider 回调：换 token -> 拉资料 -> 判定 -> 签发 session -> 回填 challenge。
+  // provider 回调：换 token -> 拉资料 -> 判定 -> 签发 session -> 回填进程内 challenge。
   app.get("/auth/:provider/callback", async (request, reply) => {
     const query = request.query as { code?: string; state?: string };
     reply.header("content-type", "text/html; charset=utf-8");
 
     if (!query.state) {
-      return reply.status(400).send(renderCallbackPage("登录失败：缺少 state。"));
+      return reply.status(400).send(
+        renderCallbackPage({
+          message: "登录失败：缺少 state。",
+          status: "failed",
+        }),
+      );
     }
 
-    const [challenge] = await db
-      .select()
-      .from(loginChallenges)
-      .where(eq(loginChallenges.state, query.state))
-      .limit(1);
+    const challenge = loginChallenges.get(query.state);
 
     if (!challenge) {
-      return reply.status(404).send(renderCallbackPage("登录失败：无效的登录会话。"));
+      return reply.status(404).send(
+        renderCallbackPage({
+          message: "登录失败：无效的登录会话。",
+          status: "failed",
+        }),
+      );
     }
 
     // 已过期或已被消费：直接失败，防重放。
     if (challenge.status !== "pending") {
-      return reply.send(renderCallbackPage("该登录请求已处理，请回到 Muse。"));
+      return reply.send(
+        renderCallbackPage({
+          message: "该登录请求已处理，请回到 Muse。",
+          status: "failed",
+        }),
+      );
     }
     if (new Date(challenge.expiresAt).getTime() <= Date.now()) {
-      await db
-        .update(loginChallenges)
-        .set({ status: "expired" })
-        .where(eq(loginChallenges.state, challenge.state));
-      return reply.status(410).send(renderCallbackPage("登录已超时，请重新扫码。"));
+      challenge.status = "expired";
+      return reply.status(410).send(
+        renderCallbackPage({
+          message: "登录已超时，请重新扫码。",
+          status: "failed",
+        }),
+      );
     }
 
     if (!query.code) {
-      await failChallenge(challenge.state, "missing_code");
-      return reply.status(400).send(renderCallbackPage("登录失败：缺少授权码。"));
+      failChallenge(challenge.state, "missing_code");
+      return reply.status(400).send(
+        renderCallbackPage({
+          message: "登录失败：缺少授权码。",
+          status: "failed",
+        }),
+      );
     }
 
     const provider = authProviderSchema.parse(challenge.provider);
@@ -134,47 +269,45 @@ export async function authRoutes(app: FastifyInstance) {
       const token = await adapter.exchangeToken({
         code: query.code,
         redirectUri,
-        codeVerifier: challenge.codeVerifier ?? undefined,
+        codeVerifier: challenge.codeVerifier,
       });
       const profile = await adapter.fetchUserInfo(token);
-      const identityKey = adapter.buildIdentityKey(profile);
 
-      const { userId, identityId } = await resolveIdentity({
+      const { userId } = await resolveIdentity({
         provider,
-        identityKey,
         profile,
         currentUserId: challenge.userId,
       });
 
       const session = await createSession({
         userId,
-        identityId,
         clientPlatform: challenge.clientPlatform as never,
       });
 
-      // 明文 token 暂存到 challenge，供轮询取走一次；hash 存 session_token_hash 备查。
-      await db
-        .update(loginChallenges)
-        .set({
-          status: "authorized",
-          userId,
-          sessionTokenHash: hashToken(session.token),
-          metadata: JSON.stringify({
-            sessionToken: session.token,
-            expiresAt: session.expiresAt,
-          }),
-        })
-        .where(eq(loginChallenges.state, challenge.state));
+      // 明文 token 只短暂存在进程内 challenge，供轮询取走一次；MariaDB 只保存 token hash。
+      challenge.status = "authorized";
+      challenge.userId = userId;
+      challenge.sessionToken = session.token;
 
-      return reply.send(renderCallbackPage("登录成功，请回到 Muse。"));
+      return reply.send(
+        renderCallbackPage({
+          message: "登录成功，正在返回 Muse。",
+          status: "success",
+        }),
+      );
     } catch (error) {
       const code =
         error instanceof IdentityConflictError
           ? "IDENTITY_ALREADY_BOUND"
           : "exchange_failed";
-      await failChallenge(challenge.state, code);
+      failChallenge(challenge.state, code);
       request.log.error({ err: error }, "auth callback failed");
-      return reply.status(400).send(renderCallbackPage("登录失败，请回到 Muse 重试。"));
+      return reply.status(400).send(
+        renderCallbackPage({
+          message: "登录失败，请回到 Muse 重试。",
+          status: "failed",
+        }),
+      );
     }
   });
 
@@ -185,11 +318,7 @@ export async function authRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: "Missing state" });
     }
 
-    const [challenge] = await db
-      .select()
-      .from(loginChallenges)
-      .where(eq(loginChallenges.state, state))
-      .limit(1);
+    const challenge = loginChallenges.get(state);
 
     if (!challenge) {
       const body: AuthStatusResponse = { status: "expired" };
@@ -201,10 +330,7 @@ export async function authRoutes(app: FastifyInstance) {
       challenge.status === "pending" &&
       new Date(challenge.expiresAt).getTime() <= Date.now()
     ) {
-      await db
-        .update(loginChallenges)
-        .set({ status: "expired" })
-        .where(eq(loginChallenges.state, state));
+      challenge.status = "expired";
       const body: AuthStatusResponse = { status: "expired" };
       return reply.send(body);
     }
@@ -228,8 +354,7 @@ export async function authRoutes(app: FastifyInstance) {
     }
 
     // authorized：取出暂存 token 与用户，置 consumed，清掉明文。
-    const meta = safeParse(challenge.metadata);
-    const sessionToken = meta.sessionToken as string | undefined;
+    const sessionToken = challenge.sessionToken;
     if (!challenge.userId || !sessionToken) {
       const body: AuthStatusResponse = { status: "failed" };
       return reply.send(body);
@@ -241,14 +366,9 @@ export async function authRoutes(app: FastifyInstance) {
       return reply.send(body);
     }
 
-    await db
-      .update(loginChallenges)
-      .set({
-        status: "consumed",
-        metadata: "{}",
-        consumedAt: new Date().toISOString(),
-      })
-      .where(eq(loginChallenges.state, state));
+    challenge.status = "consumed";
+    challenge.sessionToken = undefined;
+    loginChallenges.delete(state);
 
     const body: AuthStatusResponse = {
       status: "authorized",
@@ -277,17 +397,10 @@ export async function authRoutes(app: FastifyInstance) {
   });
 }
 
-async function failChallenge(state: string, errorCode: string) {
-  await db
-    .update(loginChallenges)
-    .set({ status: "failed", errorCode })
-    .where(eq(loginChallenges.state, state));
-}
-
-function safeParse(raw: string): Record<string, unknown> {
-  try {
-    return JSON.parse(raw) as Record<string, unknown>;
-  } catch {
-    return {};
+function failChallenge(state: string, errorCode: string) {
+  const challenge = loginChallenges.get(state);
+  if (challenge) {
+    challenge.status = "failed";
+    challenge.errorCode = errorCode;
   }
 }

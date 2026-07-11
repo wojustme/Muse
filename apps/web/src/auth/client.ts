@@ -13,7 +13,7 @@ export const {
   saveToken,
   startFeishuChallenge,
 } = createMuseApiClient({
-  platform: "macos",
+  platform: "web",
   serverUrl,
 });
 
