@@ -1,0 +1,21 @@
+docs/local-tools-agent-implementation-plan.md
+  s_9d3c3af3073ace::t_3e914a69f986bf 1-716
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "58378f239c231d392aee02748dd426d8b6142955",
+  "prompts": {},
+  "sessions": {
+    "s_9d3c3af3073ace": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5125-54e2-7a10-8229-be88c9933a54",
+        "model": "unknown"
+      },
+      "human_author": "wojustme <wojustme@users.noreply.github.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
