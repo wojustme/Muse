@@ -1,0 +1,190 @@
+README.md
+  s_9c0cfde2cfb9eb::t_ee3e33060d8bd7 3,5,7-12,14-49,53-63,65-69,73-192 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a5143378214bcd82d35efcb","tool_type":"agent","tool_id":"apply_patch","line_ranges":[{"Single":3},{"Single":5},{"Range":[7,12]},{"Range":[14,49]},{"Range":[53,63]},{"Range":[65,69]},{"Range":[73,192]}]}]}
+apps/desktop/package.json
+  s_d5ebf84707d5c3::t_1debc588446063 18
+apps/desktop/src/auth/client.ts
+  s_d5ebf84707d5c3::t_1dca7ebb8c8e69 1,5-20
+apps/desktop/src/styles.css
+  s_f74b8464f6ce09::t_1de3b33089cad8 25,41-45,49-172,176,255-259,325-338,417,425-449,453-582,657,663-706,850-865,925-941,945-962,999,1005-1015,1139-1142
+apps/desktop/vite.config.ts
+  s_d5ebf84707d5c3::t_270e7b700f991d 2,9-15
+apps/server/src/db/schema.ts
+  s_f74b8464f6ce09::t_438ea356007862 1-13,15,18,21-22,24-28,35-38,40-45,47-48,50-53,56-61,65-66,69-74,78,82-93,95-103,106-110,114-128,131-160,163-190,193-223,225-234
+apps/server/src/models/authorized.ts
+  s_f74b8464f6ce09::t_63eb1831955021 1-61
+apps/server/src/routes/chat.ts
+  s_f74b8464f6ce09::t_b814783ebd3090 2-3,5,8-10,32-95,107-154,159-300,303-304,306-320
+apps/server/src/routes/models.ts
+  s_f74b8464f6ce09::t_4c93ebb9074212 1,3-5,8-30
+apps/server/src/routes/sessions.ts
+  s_f74b8464f6ce09::t_eb262cfd39c2d2 2,4,6-68,71-83,86-117,119-202
+apps/web/index.html
+  s_d5ebf84707d5c3::t_1e5df3efdc9045 1-12
+apps/web/package.json
+  s_d5ebf84707d5c3::t_27c6f150bfb01a 1-26
+apps/web/src/auth/client.ts
+  s_d5ebf84707d5c3::t_6483070fd013fe 1-20
+apps/web/src/main.tsx
+  s_d5ebf84707d5c3::t_def6fc47217485 1-10
+apps/web/src/styles.css
+  s_f74b8464f6ce09::t_20b6e85abe56dc 1-1180
+apps/web/tsconfig.json
+  s_d5ebf84707d5c3::t_f3406640c284f7 1-11
+apps/web/vite.config.ts
+  s_d5ebf84707d5c3::t_16cd091b51573a 1-24
+docs/architecture.md
+  s_d5ebf84707d5c3::t_a983ab695af947 8,13
+package.json
+  s_d5ebf84707d5c3::t_94878fa0d529cc 11
+packages/api-client/package.json
+  s_d5ebf84707d5c3::t_0c213fe7fb0f15 1-15
+packages/api-client/src/index.ts
+  s_d5ebf84707d5c3::t_bfa229ca7c6f40 1-152
+packages/api-client/tsconfig.json
+  s_d5ebf84707d5c3::t_3a377374bdab02 1-9
+packages/model-router/src/providers/deepseek.ts
+  s_f74b8464f6ce09::t_aa7bb1dcdaa0db 16
+plan.md
+  s_d5ebf84707d5c3::t_c65ce500a85f96 149,156,189,195
+tsconfig.base.json
+  s_d5ebf84707d5c3::t_2baa69c00e6d72 21-22
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "0a32100e422120ec46a86186cd59f10ba5044d95",
+  "prompts": {},
+  "sessions": {
+    "s_9c0cfde2cfb9eb": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6a5143118214bcd82d35ef20",
+        "model": "gpt-5.5__dev"
+      },
+      "human_author": "wojustme <wojustme@users.noreply.github.com>"
+    },
+    "s_d5ebf84707d5c3": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f3f8d-2f2f-72a1-b177-af3d8cb21f5f",
+        "model": "unknown"
+      },
+      "human_author": "wojustme <wojustme@users.noreply.github.com>"
+    },
+    "s_f74b8464f6ce09": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f4e77-5170-74e1-9e2f-7adaf216f4a1",
+        "model": "unknown"
+      },
+      "human_author": "wojustme <wojustme@users.noreply.github.com>"
+    }
+  },
+  "attestation_metadata": {
+    "README.md": [
+      {
+        "hash": "s_9c0cfde2cfb9eb::t_ee3e33060d8bd7",
+        "line_ranges": [
+          {
+            "Single": 3
+          },
+          {
+            "Single": 5
+          },
+          {
+            "Range": [
+              7,
+              12
+            ]
+          },
+          {
+            "Range": [
+              14,
+              49
+            ]
+          },
+          {
+            "Range": [
+              53,
+              63
+            ]
+          },
+          {
+            "Range": [
+              65,
+              69
+            ]
+          },
+          {
+            "Range": [
+              73,
+              192
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a5143378214bcd82d35efcb",
+            "tool_type": "agent",
+            "tool_id": "apply_patch",
+            "line_ranges": [
+              {
+                "Single": 3
+              },
+              {
+                "Single": 5
+              },
+              {
+                "Range": [
+                  7,
+                  12
+                ]
+              },
+              {
+                "Range": [
+                  14,
+                  49
+                ]
+              },
+              {
+                "Range": [
+                  53,
+                  63
+                ]
+              },
+              {
+                "Range": [
+                  65,
+                  69
+                ]
+              },
+              {
+                "Range": [
+                  73,
+                  192
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "remote_transcripts": {
+    "s_9c0cfde2cfb9eb": {
+      "tool": "trae",
+      "conversation_id": "6a5143118214bcd82d35ef20",
+      "session_id": "6a5143118214bcd82d35ef20",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_9c0cfde2cfb9eb::t_ee3e33060d8bd7": {
+      "tool": "trae",
+      "conversation_id": "6a5143118214bcd82d35ef20",
+      "session_id": "6a5143118214bcd82d35ef20",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    }
+  }
+}
