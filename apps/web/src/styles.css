@@ -759,6 +759,99 @@ button {
   white-space: pre-wrap;
 }
 
+.message-markdown {
+  color: #1f2937;
+  font-size: 14px;
+  line-height: 1.62;
+  overflow-wrap: anywhere;
+}
+
+.message-markdown > *:first-child {
+  margin-top: 0;
+}
+
+.message-markdown > *:last-child {
+  margin-bottom: 0;
+}
+
+.message-markdown p,
+.message-markdown ul,
+.message-markdown ol,
+.message-markdown blockquote,
+.message-markdown pre,
+.message-markdown table {
+  margin: 0 0 10px;
+}
+
+.message-markdown ul,
+.message-markdown ol {
+  padding-left: 20px;
+}
+
+.message-markdown li + li {
+  margin-top: 4px;
+}
+
+.message-markdown code {
+  padding: 2px 5px;
+  border-radius: 5px;
+  background: #eef2f6;
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Monaco,
+    Consolas,
+    "Liberation Mono",
+    monospace;
+  font-size: 12px;
+}
+
+.message-markdown pre {
+  overflow: auto;
+  padding: 10px 12px;
+  border: 1px solid #d9e2ec;
+  border-radius: 7px;
+  background: #f8fafc;
+}
+
+.message-markdown pre code {
+  padding: 0;
+  background: transparent;
+  white-space: pre;
+}
+
+.message-markdown blockquote {
+  padding-left: 11px;
+  border-left: 3px solid #cfd8e3;
+  color: #475467;
+}
+
+.message-markdown table {
+  display: block;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+
+.message-markdown th,
+.message-markdown td {
+  padding: 7px 9px;
+  border: 1px solid #d9e2ec;
+  text-align: left;
+  vertical-align: top;
+}
+
+.message-markdown th {
+  background: #f1f5f9;
+  font-weight: 780;
+}
+
+.message-markdown a {
+  color: #14532d;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .empty-state {
   display: grid;
   align-content: center;

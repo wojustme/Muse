@@ -31,6 +31,8 @@ import {
   useRef,
   useState,
 } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import type { AuthUser } from "@muse/shared";
 import { authHeaders, fetchMe, logout } from "./auth/client";
 import { LoginScreen } from "./auth/LoginScreen";
@@ -222,6 +224,30 @@ function messageText(message: ServerMessage): string {
     .trim();
 
   return partText || message.content || "";
+}
+
+function MessageText({ message }: { message: Message }) {
+  if (message.role === "assistant") {
+    return (
+      <div className="message-markdown">
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+          {message.text}
+        </ReactMarkdown>
+        {message.streaming ? (
+          <span className="typing-caret" aria-hidden="true" />
+        ) : null}
+      </div>
+    );
+  }
+
+  return (
+    <p>
+      {message.text}
+      {message.streaming ? (
+        <span className="typing-caret" aria-hidden="true" />
+      ) : null}
+    </p>
+  );
 }
 
 async function fetchSessionMessages(sessionId: string): Promise<{
@@ -860,7 +886,31 @@ function ChatApp({
     void sendCurrentMessage();
   }
 
+  function lastUserMessageText(): string {
+    return (
+      [...messages].reverse().find((message) => message.role === "user")?.text ??
+      ""
+    );
+  }
+
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (
+      event.key === "ArrowUp" &&
+      !event.nativeEvent.isComposing &&
+      event.currentTarget.value.trim().length === 0
+    ) {
+      const previousText = lastUserMessageText();
+      if (previousText) {
+        event.preventDefault();
+        setInput(previousText);
+        window.requestAnimationFrame(() => {
+          const textarea = inputRef.current;
+          textarea?.setSelectionRange(previousText.length, previousText.length);
+        });
+      }
+      return;
+    }
+
     if (
       event.key !== "Enter" ||
       event.shiftKey ||
@@ -1075,12 +1125,7 @@ function ChatApp({
                     <div className="message-role">
                       {message.role === "assistant" ? "Muse" : "You"}
                     </div>
-                    <p>
-                      {message.text}
-                      {message.streaming ? (
-                        <span className="typing-caret" aria-hidden="true" />
-                      ) : null}
-                    </p>
+                    <MessageText message={message} />
                   </article>
                 ))}
               </div>
