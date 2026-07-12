@@ -1,9 +1,11 @@
 import {
   AlertCircle,
   Bot,
+  Check,
   ChevronDown,
   Clock3,
   Cpu,
+  Edit3,
   Globe2,
   History,
   Library,
@@ -14,6 +16,7 @@ import {
   Paperclip,
   PanelRight,
   Plus,
+  RefreshCw,
   Search,
   SendHorizontal,
   Settings,
@@ -202,6 +205,30 @@ async function deleteSessionRequest(sessionId: string): Promise<void> {
   if (!response.ok) {
     throw new Error(`删除会话失败（${response.status}）`);
   }
+}
+
+async function renameSessionRequest(
+  sessionId: string,
+  title: string,
+): Promise<ServerSession> {
+  const response = await fetch(
+    `${serverUrl}/api/sessions/${encodeURIComponent(sessionId)}`,
+    {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+        ...authHeaders(),
+      },
+      body: JSON.stringify({ title }),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(`重命名会话失败（${response.status}）`);
+  }
+
+  const data = (await response.json()) as { session: ServerSession };
+  return data.session;
 }
 
 function sessionFromServer(
@@ -438,6 +465,7 @@ function ChatApp({
   const [isBootstrapping, setIsBootstrapping] = useState(true);
   const [isSending, setIsSending] = useState(false);
   const [isCreatingSession, setIsCreatingSession] = useState(false);
+  const [isRefreshingSessions, setIsRefreshingSessions] = useState(false);
   const [activeSessionId, setActiveSessionId] = useState(sessions[0]?.id ?? "");
   const [selectedModel, setSelectedModel] = useState<ModelSelection | null>(
     null,
@@ -449,6 +477,11 @@ function ChatApp({
   );
   const [pendingDeleteSession, setPendingDeleteSession] =
     useState<Session | null>(null);
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
+  const [renamingSessionId, setRenamingSessionId] = useState<string | null>(
+    null,
+  );
   const [localToolSnapshot, setLocalToolSnapshot] =
     useState<LocalToolBridgeSnapshot | null>(null);
   const [approvalPrompt, setApprovalPrompt] = useState<ApprovalPrompt | null>(
@@ -590,6 +623,53 @@ function ChatApp({
     );
   }, [searchText, sessions]);
 
+  function mergeRefreshedSessions(
+    current: Session[],
+    refreshedSessions: Session[],
+  ): Session[] {
+    const drafts = current.filter((session) => session.isDraft);
+    const refreshed = refreshedSessions.map((refreshedSession) => {
+      const existing = current.find((item) => item.id === refreshedSession.id);
+      return existing
+        ? {
+            ...refreshedSession,
+            messages: existing.messages,
+            messagesLoaded: existing.messagesLoaded,
+          }
+        : refreshedSession;
+    });
+
+    return [...drafts, ...refreshed];
+  }
+
+  async function refreshSessionList() {
+    if (isRefreshingSessions || isBootstrapping) {
+      return;
+    }
+
+    setIsRefreshingSessions(true);
+    setNotice("");
+
+    try {
+      const refreshedSessions = await fetchSessions(selectedModel);
+      setSessions((current) => {
+        const next = mergeRefreshedSessions(current, refreshedSessions);
+        setActiveSessionId((currentActiveId) =>
+          next.some((session) => session.id === currentActiveId)
+            ? currentActiveId
+            : (next.find((session) => !session.isDraft)?.id ??
+              next[0]?.id ??
+              ""),
+        );
+        return next;
+      });
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "刷新会话列表失败");
+    } finally {
+      setIsRefreshingSessions(false);
+    }
+  }
+
   function startNewSession() {
     if (isCreatingSession) {
       return;
@@ -674,6 +754,83 @@ function ChatApp({
     }
 
     setPendingDeleteSession(session);
+  }
+
+  function startRenameSession(session: Session) {
+    if (renamingSessionId || deletingSessionId) {
+      return;
+    }
+
+    setEditingSessionId(session.id);
+    setRenameDraft(session.title);
+  }
+
+  function cancelRenameSession() {
+    setEditingSessionId(null);
+    setRenameDraft("");
+  }
+
+  async function saveRenameSession(session: Session) {
+    const title = renameDraft.replace(/\s+/g, " ").trim();
+
+    if (!title) {
+      setNotice("会话标题不能为空。");
+      return;
+    }
+
+    if (title === session.title) {
+      cancelRenameSession();
+      return;
+    }
+
+    setRenamingSessionId(session.id);
+    setNotice("");
+
+    try {
+      if (session.isDraft) {
+        setSessions((current) =>
+          current.map((item) =>
+            item.id === session.id ? { ...item, title } : item,
+          ),
+        );
+        cancelRenameSession();
+        return;
+      }
+
+      const renamed = await renameSessionRequest(session.id, title);
+      setSessions((current) =>
+        current.map((item) =>
+          item.id === session.id
+            ? {
+                ...item,
+                title: renamed.title,
+                updatedAt: formatTime(renamed.updatedAt),
+              }
+            : item,
+        ),
+      );
+      cancelRenameSession();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "重命名会话失败");
+    } finally {
+      setRenamingSessionId(null);
+    }
+  }
+
+  function handleRenameKeyDown(
+    event: KeyboardEvent<HTMLInputElement>,
+    session: Session,
+  ) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      cancelRenameSession();
+      return;
+    }
+
+    if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+      event.preventDefault();
+      void saveRenameSession(session);
+    }
   }
 
   async function confirmDeleteSession() {
@@ -892,8 +1049,9 @@ function ChatApp({
           }
           case "done": {
             ensureAssistantMessage();
-            const finalText =
-              event.parts?.find((part) => part.type === "text")?.text;
+            const finalText = event.parts?.find(
+              (part) => part.type === "text",
+            )?.text;
             updateMessage(targetSessionId, assistantMessageId, (message) => ({
               ...message,
               text: finalText ?? message.text,
@@ -943,8 +1101,8 @@ function ChatApp({
 
   function lastUserMessageText(): string {
     return (
-      [...messages].reverse().find((message) => message.role === "user")?.text ??
-      ""
+      [...messages].reverse().find((message) => message.role === "user")
+        ?.text ?? ""
     );
   }
 
@@ -1064,7 +1222,23 @@ function ChatApp({
         <nav className="history-list" aria-label="History">
           <div className="history-header">
             <span>Sessions</span>
-            <strong>{filteredSessions.length}</strong>
+            <div className="history-header-actions">
+              <button
+                disabled={isBootstrapping || isRefreshingSessions}
+                onClick={() => void refreshSessionList()}
+                title="刷新会话列表"
+                type="button"
+              >
+                <RefreshCw
+                  aria-hidden="true"
+                  className={isRefreshingSessions ? "spin" : undefined}
+                  size={14}
+                  strokeWidth={2.1}
+                />
+                <span className="sr-only">刷新会话列表</span>
+              </button>
+              <strong>{filteredSessions.length}</strong>
+            </div>
           </div>
           {isBootstrapping ? (
             <div className="history-state">
@@ -1082,46 +1256,122 @@ function ChatApp({
               }`}
               key={session.id}
             >
-              <button
-                className={`session-card ${
-                  session.id === activeSession?.id ? "active" : ""
-                }`}
-                onClick={() => switchSession(session)}
-                type="button"
-              >
-                <span className="session-icon">
-                  <MessageSquare
-                    aria-hidden="true"
-                    size={16}
-                    strokeWidth={2.1}
-                  />
-                </span>
-                <span className="session-card-body">
-                  <span className="session-card-title">{session.title}</span>
-                  <span className="session-card-preview">
-                    {session.preview}
+              {editingSessionId === session.id ? (
+                <div
+                  className={`session-card session-rename-card ${
+                    session.id === activeSession?.id ? "active" : ""
+                  }`}
+                >
+                  <span className="session-icon">
+                    <Edit3 aria-hidden="true" size={16} strokeWidth={2.1} />
                   </span>
-                  <span className="session-card-meta">
-                    <Clock3 aria-hidden="true" size={12} strokeWidth={2.1} />
-                    {session.updatedAt}
-                    <span>{modelLabel(session.model)}</span>
+                  <span className="session-card-body">
+                    <input
+                      aria-label="会话标题"
+                      autoFocus
+                      disabled={renamingSessionId === session.id}
+                      onChange={(event) => setRenameDraft(event.target.value)}
+                      onKeyDown={(event) => handleRenameKeyDown(event, session)}
+                      value={renameDraft}
+                    />
+                    <span className="session-card-meta">
+                      <Clock3 aria-hidden="true" size={12} strokeWidth={2.1} />
+                      {session.updatedAt}
+                      <span>{modelLabel(session.model)}</span>
+                    </span>
                   </span>
-                </span>
-              </button>
-              <button
-                className="session-delete"
-                disabled={deletingSessionId === session.id}
-                onClick={() => requestDeleteSession(session)}
-                title="删除会话"
-                type="button"
-              >
-                {deletingSessionId === session.id ? (
-                  <Loader2 aria-hidden="true" className="spin" size={15} />
-                ) : (
-                  <Trash2 aria-hidden="true" size={15} strokeWidth={2.1} />
-                )}
-                <span className="sr-only">删除会话</span>
-              </button>
+                  <span className="session-rename-actions">
+                    <button
+                      disabled={renamingSessionId === session.id}
+                      onClick={() => void saveRenameSession(session)}
+                      title="保存名称"
+                      type="button"
+                    >
+                      {renamingSessionId === session.id ? (
+                        <Loader2
+                          aria-hidden="true"
+                          className="spin"
+                          size={15}
+                        />
+                      ) : (
+                        <Check aria-hidden="true" size={15} strokeWidth={2.1} />
+                      )}
+                      <span className="sr-only">保存名称</span>
+                    </button>
+                    <button
+                      disabled={renamingSessionId === session.id}
+                      onClick={cancelRenameSession}
+                      title="取消重命名"
+                      type="button"
+                    >
+                      <X aria-hidden="true" size={15} strokeWidth={2.1} />
+                      <span className="sr-only">取消重命名</span>
+                    </button>
+                  </span>
+                </div>
+              ) : (
+                <>
+                  <button
+                    className={`session-card ${
+                      session.id === activeSession?.id ? "active" : ""
+                    }`}
+                    onClick={() => switchSession(session)}
+                    type="button"
+                  >
+                    <span className="session-icon">
+                      <MessageSquare
+                        aria-hidden="true"
+                        size={16}
+                        strokeWidth={2.1}
+                      />
+                    </span>
+                    <span className="session-card-body">
+                      <span className="session-card-title">
+                        {session.title}
+                      </span>
+                      <span className="session-card-preview">
+                        {session.preview}
+                      </span>
+                      <span className="session-card-meta">
+                        <Clock3
+                          aria-hidden="true"
+                          size={12}
+                          strokeWidth={2.1}
+                        />
+                        {session.updatedAt}
+                        <span>{modelLabel(session.model)}</span>
+                      </span>
+                    </span>
+                  </button>
+                  <button
+                    className="session-rename"
+                    disabled={
+                      renamingSessionId === session.id ||
+                      deletingSessionId === session.id
+                    }
+                    onClick={() => startRenameSession(session)}
+                    title="重命名会话"
+                    type="button"
+                  >
+                    <Edit3 aria-hidden="true" size={15} strokeWidth={2.1} />
+                    <span className="sr-only">重命名会话</span>
+                  </button>
+                  <button
+                    className="session-delete"
+                    disabled={deletingSessionId === session.id}
+                    onClick={() => requestDeleteSession(session)}
+                    title="删除会话"
+                    type="button"
+                  >
+                    {deletingSessionId === session.id ? (
+                      <Loader2 aria-hidden="true" className="spin" size={15} />
+                    ) : (
+                      <Trash2 aria-hidden="true" size={15} strokeWidth={2.1} />
+                    )}
+                    <span className="sr-only">删除会话</span>
+                  </button>
+                </>
+              )}
             </div>
           ))}
         </nav>
@@ -1370,9 +1620,7 @@ function ChatApp({
             <div className="approval-header">
               <div>
                 <span>删除会话</span>
-                <h2 id="delete-session-title">
-                  {pendingDeleteSession.title}
-                </h2>
+                <h2 id="delete-session-title">{pendingDeleteSession.title}</h2>
               </div>
               <Trash2 aria-hidden="true" size={22} strokeWidth={2.1} />
             </div>

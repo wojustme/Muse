@@ -21,6 +21,10 @@ const createSessionSchema = z.object({
   model: modelSelectionSchema.optional(),
 });
 
+const updateSessionSchema = z.object({
+  title: z.string().trim().min(1).max(255),
+});
+
 const sessionParamsSchema = z.object({
   id: z.string().min(1),
 });
@@ -176,31 +180,90 @@ export async function sessionRoutes(app: FastifyInstance) {
     },
   );
 
-  app.get("/sessions/:id", { preHandler: requireAuth }, async (request, reply) => {
-    const params = sessionParamsSchema.safeParse(request.params);
+  app.get(
+    "/sessions/:id",
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const params = sessionParamsSchema.safeParse(request.params);
 
-    if (!params.success) {
-      return reply.status(400).send({ error: "Invalid session id" });
-    }
+      if (!params.success) {
+        return reply.status(400).send({ error: "Invalid session id" });
+      }
 
-    const [session] = await db
-      .select()
-      .from(chatSessions)
-      .where(
-        and(
-          eq(chatSessions.id, params.data.id),
-          eq(chatSessions.userId, request.userId as string),
-          eq(chatSessions.status, "active"),
-        ),
-      )
-      .limit(1);
+      const [session] = await db
+        .select()
+        .from(chatSessions)
+        .where(
+          and(
+            eq(chatSessions.id, params.data.id),
+            eq(chatSessions.userId, request.userId as string),
+            eq(chatSessions.status, "active"),
+          ),
+        )
+        .limit(1);
 
-    if (!session) {
-      return reply.status(404).send({ error: "Session not found" });
-    }
+      if (!session) {
+        return reply.status(404).send({ error: "Session not found" });
+      }
 
-    return reply.send({ session: serializeSession(session) });
-  });
+      return reply.send({ session: serializeSession(session) });
+    },
+  );
+
+  // 重命名会话：只允许会话归属用户修改 active session 的标题。
+  app.patch(
+    "/sessions/:id",
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const params = sessionParamsSchema.safeParse(request.params);
+
+      if (!params.success) {
+        return reply.status(400).send({ error: "Invalid session id" });
+      }
+
+      const parsed = updateSessionSchema.safeParse(request.body ?? {});
+
+      if (!parsed.success) {
+        return reply.status(400).send({
+          error: "Invalid session update request",
+          issues: parsed.error.flatten(),
+        });
+      }
+
+      const userId = request.userId as string;
+      const [session] = await db
+        .select()
+        .from(chatSessions)
+        .where(
+          and(
+            eq(chatSessions.id, params.data.id),
+            eq(chatSessions.userId, userId),
+            eq(chatSessions.status, "active"),
+          ),
+        )
+        .limit(1);
+
+      if (!session) {
+        return reply.status(404).send({ error: "Session not found" });
+      }
+
+      const now = new Date();
+      await db
+        .update(chatSessions)
+        .set({ title: parsed.data.title, updatedAt: now })
+        .where(
+          and(eq(chatSessions.id, session.id), eq(chatSessions.userId, userId)),
+        );
+
+      return reply.send({
+        session: serializeSession({
+          ...session,
+          title: parsed.data.title,
+          updatedAt: now,
+        }),
+      });
+    },
+  );
 
   // 删除会话：软删除（status -> deleted）。列表/消息/Chat 接口都只认 active，
   // 因此删除后会话即从历史列表消失，但底层消息记录保留可追溯。
@@ -235,10 +298,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         .update(chatSessions)
         .set({ status: "deleted", updatedAt: new Date() })
         .where(
-          and(
-            eq(chatSessions.id, session.id),
-            eq(chatSessions.userId, userId),
-          ),
+          and(eq(chatSessions.id, session.id), eq(chatSessions.userId, userId)),
         );
 
       return reply.send({ id: session.id, deleted: true });

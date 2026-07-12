@@ -23,7 +23,7 @@ installLocalToolSocket({
 
 await app.register(cors, {
   origin: true,
-  methods: ["GET", "HEAD", "POST", "DELETE", "OPTIONS"],
+  methods: ["GET", "HEAD", "POST", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["authorization", "content-type"],
 });
 
