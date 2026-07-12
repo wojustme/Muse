@@ -23,6 +23,8 @@ installLocalToolSocket({
 
 await app.register(cors, {
   origin: true,
+  methods: ["GET", "HEAD", "POST", "DELETE", "OPTIONS"],
+  allowedHeaders: ["authorization", "content-type"],
 });
 
 await app.register(healthRoutes, { prefix: "/health" });

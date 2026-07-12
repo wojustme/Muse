@@ -19,6 +19,7 @@ import {
   Settings,
   ShieldCheck,
   Sparkles,
+  Trash2,
   X,
 } from "lucide-react";
 import {
@@ -185,6 +186,20 @@ async function fetchSessions(
   return (data.sessions ?? []).map((session) =>
     sessionFromServer(session, defaultSelection),
   );
+}
+
+async function deleteSessionRequest(sessionId: string): Promise<void> {
+  const response = await fetch(
+    `${serverUrl}/api/sessions/${encodeURIComponent(sessionId)}`,
+    {
+      method: "DELETE",
+      headers: authHeaders(),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(`删除会话失败（${response.status}）`);
+  }
 }
 
 function sessionFromServer(
@@ -403,6 +418,11 @@ function ChatApp({
   );
   const [searchText, setSearchText] = useState("");
   const [notice, setNotice] = useState<string>("");
+  const [deletingSessionId, setDeletingSessionId] = useState<string | null>(
+    null,
+  );
+  const [pendingDeleteSession, setPendingDeleteSession] =
+    useState<Session | null>(null);
   const [localToolSnapshot, setLocalToolSnapshot] =
     useState<LocalToolBridgeSnapshot | null>(null);
   const [approvalPrompt, setApprovalPrompt] = useState<ApprovalPrompt | null>(
@@ -599,6 +619,67 @@ function ChatApp({
             error instanceof Error ? error.message : "加载消息历史失败",
           );
         });
+    }
+  }
+
+  // 从本地列表移除会话并在需要时重选活动会话；供草稿丢弃与后端删除成功后复用。
+  function removeSessionFromState(sessionId: string) {
+    setSessions((current) => {
+      const next = current.filter((session) => session.id !== sessionId);
+      setActiveSessionId((currentActiveId) =>
+        currentActiveId === sessionId
+          ? (next.find((session) => !session.isDraft)?.id ?? next[0]?.id ?? "")
+          : currentActiveId,
+      );
+      return next;
+    });
+  }
+
+  // 点击删除：草稿直接本地移除，已落库会话弹出应用内确认弹窗。
+  // 不用 window.confirm，避免其在部分 WebView 环境下不弹窗直接返回而“点了没反应”。
+  function requestDeleteSession(session: Session) {
+    if (deletingSessionId) {
+      return;
+    }
+
+    if (session.isDraft) {
+      removeSessionFromState(session.id);
+      return;
+    }
+
+    setPendingDeleteSession(session);
+  }
+
+  async function confirmDeleteSession() {
+    const session = pendingDeleteSession;
+    if (!session) {
+      return;
+    }
+
+    setPendingDeleteSession(null);
+    setDeletingSessionId(session.id);
+    setNotice("");
+
+    try {
+      await deleteSessionRequest(session.id);
+      removeSessionFromState(session.id);
+      const refreshedSessions = await fetchSessions(selectedModel);
+      setSessions((current) =>
+        refreshedSessions.map((refreshed) => {
+          const existing = current.find((item) => item.id === refreshed.id);
+          return existing
+            ? {
+                ...refreshed,
+                messages: existing.messages,
+                messagesLoaded: existing.messagesLoaded,
+              }
+            : refreshed;
+        }),
+      );
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "删除会话失败");
+    } finally {
+      setDeletingSessionId(null);
     }
   }
 
@@ -945,27 +1026,53 @@ function ChatApp({
             <div className="history-state">No matched sessions</div>
           ) : null}
           {filteredSessions.map((session) => (
-            <button
-              className={`session-card ${
+            <div
+              className={`session-card-wrap ${
                 session.id === activeSession?.id ? "active" : ""
               }`}
               key={session.id}
-              onClick={() => switchSession(session)}
-              type="button"
             >
-              <span className="session-icon">
-                <MessageSquare aria-hidden="true" size={16} strokeWidth={2.1} />
-              </span>
-              <span className="session-card-body">
-                <span className="session-card-title">{session.title}</span>
-                <span className="session-card-preview">{session.preview}</span>
-                <span className="session-card-meta">
-                  <Clock3 aria-hidden="true" size={12} strokeWidth={2.1} />
-                  {session.updatedAt}
-                  <span>{modelLabel(session.model)}</span>
+              <button
+                className={`session-card ${
+                  session.id === activeSession?.id ? "active" : ""
+                }`}
+                onClick={() => switchSession(session)}
+                type="button"
+              >
+                <span className="session-icon">
+                  <MessageSquare
+                    aria-hidden="true"
+                    size={16}
+                    strokeWidth={2.1}
+                  />
                 </span>
-              </span>
-            </button>
+                <span className="session-card-body">
+                  <span className="session-card-title">{session.title}</span>
+                  <span className="session-card-preview">
+                    {session.preview}
+                  </span>
+                  <span className="session-card-meta">
+                    <Clock3 aria-hidden="true" size={12} strokeWidth={2.1} />
+                    {session.updatedAt}
+                    <span>{modelLabel(session.model)}</span>
+                  </span>
+                </span>
+              </button>
+              <button
+                className="session-delete"
+                disabled={deletingSessionId === session.id}
+                onClick={() => requestDeleteSession(session)}
+                title="删除会话"
+                type="button"
+              >
+                {deletingSessionId === session.id ? (
+                  <Loader2 aria-hidden="true" className="spin" size={15} />
+                ) : (
+                  <Trash2 aria-hidden="true" size={15} strokeWidth={2.1} />
+                )}
+                <span className="sr-only">删除会话</span>
+              </button>
+            </div>
           ))}
         </nav>
       </aside>
@@ -1206,6 +1313,46 @@ function ChatApp({
           </div>
         </div>
       </aside>
+
+      {pendingDeleteSession ? (
+        <div
+          aria-labelledby="delete-session-title"
+          aria-modal="true"
+          className="approval-backdrop"
+          role="dialog"
+        >
+          <section className="approval-dialog">
+            <div className="approval-header">
+              <div>
+                <span>删除会话</span>
+                <h2 id="delete-session-title">
+                  {pendingDeleteSession.title}
+                </h2>
+              </div>
+              <Trash2 aria-hidden="true" size={22} strokeWidth={2.1} />
+            </div>
+            <p className="approval-message">
+              删除后该会话将从历史列表移除，此操作不可撤销。
+            </p>
+            <div className="approval-actions">
+              <button
+                className="approval-button secondary"
+                onClick={() => setPendingDeleteSession(null)}
+                type="button"
+              >
+                取消
+              </button>
+              <button
+                className="approval-button danger"
+                onClick={() => void confirmDeleteSession()}
+                type="button"
+              >
+                删除
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
 
       {approvalPrompt ? (
         <div

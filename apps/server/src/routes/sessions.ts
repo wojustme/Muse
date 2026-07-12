@@ -201,4 +201,47 @@ export async function sessionRoutes(app: FastifyInstance) {
 
     return reply.send({ session: serializeSession(session) });
   });
+
+  // 删除会话：软删除（status -> deleted）。列表/消息/Chat 接口都只认 active，
+  // 因此删除后会话即从历史列表消失，但底层消息记录保留可追溯。
+  app.delete(
+    "/sessions/:id",
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const params = sessionParamsSchema.safeParse(request.params);
+
+      if (!params.success) {
+        return reply.status(400).send({ error: "Invalid session id" });
+      }
+
+      const userId = request.userId as string;
+      const [session] = await db
+        .select()
+        .from(chatSessions)
+        .where(
+          and(
+            eq(chatSessions.id, params.data.id),
+            eq(chatSessions.userId, userId),
+            eq(chatSessions.status, "active"),
+          ),
+        )
+        .limit(1);
+
+      if (!session) {
+        return reply.status(404).send({ error: "Session not found" });
+      }
+
+      await db
+        .update(chatSessions)
+        .set({ status: "deleted", updatedAt: new Date() })
+        .where(
+          and(
+            eq(chatSessions.id, session.id),
+            eq(chatSessions.userId, userId),
+          ),
+        );
+
+      return reply.send({ id: session.id, deleted: true });
+    },
+  );
 }

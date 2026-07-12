@@ -1204,3 +1204,158 @@ button {
     opacity: 0;
   }
 }
+
+.approval-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(15 23 42 / 42%);
+}
+
+.approval-dialog {
+  display: grid;
+  gap: 16px;
+  width: min(520px, calc(100vw - 48px));
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  padding: 18px;
+  border: 1px solid #d8e0ea;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 24px 70px rgb(15 23 42 / 28%);
+}
+
+.approval-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+}
+
+.approval-header div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.approval-header span {
+  width: fit-content;
+  padding: 3px 7px;
+  border-radius: 999px;
+  color: #92400e;
+  background: #fef3c7;
+  font-size: 11px;
+  font-weight: 820;
+}
+
+.approval-header h2 {
+  overflow: hidden;
+  margin: 0;
+  color: #111827;
+  font-size: 18px;
+  font-weight: 830;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.approval-header svg {
+  flex: 0 0 auto;
+  color: #b42318;
+}
+
+.approval-message {
+  margin: 0;
+  color: #475467;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.approval-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  min-width: 0;
+}
+
+.approval-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 92px;
+  height: 36px;
+  padding: 0 14px;
+  border: none;
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 780;
+}
+
+.approval-button.secondary {
+  color: #344054;
+  background: #eef2f6;
+}
+
+.approval-button.secondary:hover {
+  background: #e2e8f0;
+}
+
+.approval-button.danger {
+  color: #ffffff;
+  background: #b42318;
+}
+
+.approval-button.danger:hover {
+  background: #912018;
+}
+
+/* 会话卡片容器：为删除按钮提供定位上下文，hover / active 时显现删除按钮。 */
+.session-card-wrap {
+  position: relative;
+  width: 100%;
+}
+
+.session-card-wrap .session-card {
+  padding-right: 34px;
+}
+
+.session-delete {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  color: #8a95a3;
+  background: transparent;
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity 0.12s ease,
+    color 0.12s ease,
+    background 0.12s ease;
+}
+
+.session-card-wrap:hover .session-delete,
+.session-card-wrap.active .session-delete,
+.session-delete:focus-visible {
+  opacity: 1;
+}
+
+.session-delete:hover {
+  color: #b42318;
+  background: #fdecec;
+}
+
+.session-delete:disabled {
+  cursor: default;
+  opacity: 1;
+}

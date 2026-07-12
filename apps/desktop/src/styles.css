@@ -964,6 +964,13 @@ button {
   overflow-wrap: anywhere;
 }
 
+.approval-message {
+  margin: 0;
+  color: #475467;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
 .approval-actions {
   display: flex;
   justify-content: flex-end;
@@ -1000,6 +1007,15 @@ button {
 
 .approval-button.secondary:hover {
   background: #e2e8f0;
+}
+
+.approval-button.danger {
+  color: #ffffff;
+  background: #b42318;
+}
+
+.approval-button.danger:hover {
+  background: #912018;
 }
 
 @media (max-width: 1180px) {
@@ -1314,4 +1330,51 @@ button {
   50% {
     opacity: 0;
   }
+}
+
+/* 会话卡片容器：为删除按钮提供定位上下文，hover / active 时显现删除按钮。 */
+.session-card-wrap {
+  position: relative;
+  width: 100%;
+}
+
+.session-card-wrap .session-card {
+  padding-right: 34px;
+}
+
+.session-delete {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  color: #8a95a3;
+  background: transparent;
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity 0.12s ease,
+    color 0.12s ease,
+    background 0.12s ease;
+}
+
+.session-card-wrap:hover .session-delete,
+.session-card-wrap.active .session-delete,
+.session-delete:focus-visible {
+  opacity: 1;
+}
+
+.session-delete:hover {
+  color: #b42318;
+  background: #fdecec;
+}
+
+.session-delete:disabled {
+  cursor: default;
+  opacity: 1;
 }
