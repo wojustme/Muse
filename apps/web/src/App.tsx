@@ -39,6 +39,8 @@ type Message = {
   role: "user" | "assistant";
   text: string;
   createdAt?: string;
+  // 流式接收中：用于渲染打字机光标，接收完成后置为 false。
+  streaming?: boolean;
 };
 
 type ModelSelection = {
@@ -236,6 +238,76 @@ async function fetchSessionMessages(sessionId: string): Promise<{
   };
 }
 
+// SSE 事件形态：与后端 chat 路由的 writeSseEvent 一一对应。
+type ChatStreamEvent =
+  | { type: "start"; id: string; sessionId: string; session?: ServerSession }
+  | { type: "delta"; text: string }
+  | {
+      type: "done";
+      id: string;
+      sessionId: string;
+      parts?: Array<{ type: string; text?: string }>;
+      session?: ServerSession;
+    }
+  | { type: "error"; error?: string; message?: string };
+
+// 读取 text/event-stream，按 `data: <json>` 逐条解析并回调，供打字机渲染使用。
+async function consumeChatStream(
+  response: Response,
+  onEvent: (event: ChatStreamEvent) => void,
+): Promise<void> {
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw new Error("当前环境不支持流式响应");
+  }
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  const flush = (chunk: string) => {
+    // SSE 以空行分隔事件；每个事件可能有多行，取其中的 data: 负载拼接。
+    const dataLines = chunk
+      .split("\n")
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => line.slice(5).trim());
+
+    if (!dataLines.length) {
+      return;
+    }
+
+    const payload = dataLines.join("");
+    if (!payload) {
+      return;
+    }
+
+    try {
+      onEvent(JSON.parse(payload) as ChatStreamEvent);
+    } catch {
+      // 忽略无法解析的心跳/空块。
+    }
+  };
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+
+    buffer += decoder.decode(value, { stream: true });
+
+    let boundary = buffer.indexOf("\n\n");
+    while (boundary !== -1) {
+      flush(buffer.slice(0, boundary));
+      buffer = buffer.slice(boundary + 2);
+      boundary = buffer.indexOf("\n\n");
+    }
+  }
+
+  if (buffer.trim()) {
+    flush(buffer);
+  }
+}
+
 // 认证门：无有效登录态时展示 LoginScreen，否则进入聊天界面。
 export function App() {
   const [authState, setAuthState] = useState<"checking" | "in" | "out">(
@@ -318,6 +390,7 @@ function ChatApp({
   const [searchText, setSearchText] = useState("");
   const [notice, setNotice] = useState<string>("");
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const conversationRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -395,6 +468,15 @@ function ChatApp({
   );
 
   const messages = activeSession?.messages ?? [];
+
+  // 消息增长或流式 delta 到达时，保持滚动到底部，跟随打字机输出。
+  const lastMessage = messages[messages.length - 1];
+  useEffect(() => {
+    const node = conversationRef.current;
+    if (node) {
+      node.scrollTop = node.scrollHeight;
+    }
+  }, [messages.length, lastMessage?.text, activeSessionId]);
 
   const filteredSessions = useMemo(() => {
     // 草稿会话（尚未发送首条消息）不进入左侧历史列表，仅作为当前活动会话展示。
@@ -515,6 +597,26 @@ function ChatApp({
     );
   }
 
+  // 按 messageId 更新会话内的某条消息（打字机 delta / 定稿时使用）。
+  function updateMessage(
+    sessionId: string,
+    messageId: string,
+    updater: (message: Message) => Message,
+  ) {
+    setSessions((current) =>
+      current.map((session) =>
+        session.id === sessionId
+          ? {
+              ...session,
+              messages: session.messages.map((message) =>
+                message.id === messageId ? updater(message) : message,
+              ),
+            }
+          : session,
+      ),
+    );
+  }
+
   async function sendCurrentMessage() {
     const text = input.trim();
     if (!text || isSending) {
@@ -571,20 +673,27 @@ function ChatApp({
         throw new Error(`Server responded with ${response.status}`);
       }
 
-      const data = await response.json();
-      const assistantText =
-        data.parts?.find((part: { type: string }) => part.type === "text")
-          ?.text ?? "No response text returned.";
+      // 先插入一个空的、标记为 streaming 的 assistant 占位气泡，随 delta 增长。
+      let assistantMessageId: string = crypto.randomUUID();
+      let assistantInserted = false;
+      let streamError: string | null = null;
 
-      appendMessage(targetSessionId, {
-        id: data.id ?? crypto.randomUUID(),
-        role: "assistant",
-        text: assistantText,
-      });
+      const ensureAssistantMessage = () => {
+        if (!assistantInserted) {
+          appendMessage(targetSessionId, {
+            id: assistantMessageId,
+            role: "assistant",
+            text: "",
+            streaming: true,
+          });
+          assistantInserted = true;
+        }
+      };
 
-      // 首消息发送成功后会话才在后端落库：去掉草稿标记并同步后端元信息。
-      const persistedSession = data.session as ServerSession | undefined;
-      if (persistedSession) {
+      const syncPersistedSession = (persistedSession?: ServerSession) => {
+        if (!persistedSession) {
+          return;
+        }
         setSessions((current) =>
           current.map((session) =>
             session.id === targetSessionId
@@ -600,6 +709,62 @@ function ChatApp({
                 }
               : session,
           ),
+        );
+      };
+
+      await consumeChatStream(response, (event) => {
+        switch (event.type) {
+          case "start": {
+            assistantMessageId = event.id ?? assistantMessageId;
+            ensureAssistantMessage();
+            syncPersistedSession(event.session);
+            break;
+          }
+          case "delta": {
+            ensureAssistantMessage();
+            updateMessage(targetSessionId, assistantMessageId, (message) => ({
+              ...message,
+              text: message.text + event.text,
+            }));
+            break;
+          }
+          case "done": {
+            ensureAssistantMessage();
+            const finalText =
+              event.parts?.find((part) => part.type === "text")?.text;
+            updateMessage(targetSessionId, assistantMessageId, (message) => ({
+              ...message,
+              text: finalText ?? message.text,
+              streaming: false,
+            }));
+            syncPersistedSession(event.session);
+            break;
+          }
+          case "error": {
+            streamError = event.message ?? event.error ?? "发送失败";
+            break;
+          }
+          default:
+            break;
+        }
+      });
+
+      if (streamError) {
+        // 回收未产出内容的占位气泡，并提示错误。
+        if (assistantInserted) {
+          updateMessage(targetSessionId, assistantMessageId, (message) => ({
+            ...message,
+            text: message.text || "（生成失败）",
+            streaming: false,
+          }));
+        }
+        throw new Error(streamError);
+      }
+
+      // 兜底：若流意外结束仍处于 streaming 态，清掉光标。
+      if (assistantInserted) {
+        updateMessage(targetSessionId, assistantMessageId, (message) =>
+          message.streaming ? { ...message, streaming: false } : message,
         );
       }
     } catch (error) {
@@ -784,7 +949,7 @@ function ChatApp({
               </button>
             </div>
           ) : null}
-          <div className="conversation-scroll">
+          <div className="conversation-scroll" ref={conversationRef}>
             {messages.length === 0 ? (
               <div className="empty-state">
                 <span className="empty-icon">
@@ -803,7 +968,12 @@ function ChatApp({
                     <div className="message-role">
                       {message.role === "assistant" ? "Muse" : "You"}
                     </div>
-                    <p>{message.text}</p>
+                    <p>
+                      {message.text}
+                      {message.streaming ? (
+                        <span className="typing-caret" aria-hidden="true" />
+                      ) : null}
+                    </p>
                   </article>
                 ))}
               </div>

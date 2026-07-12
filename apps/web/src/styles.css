@@ -1183,3 +1183,24 @@ button {
 .login-button.ghost:hover {
   background: #dcf2e5;
 }
+
+/* 打字机光标：流式接收时紧随文本末尾闪烁。 */
+.typing-caret {
+  display: inline-block;
+  width: 2px;
+  height: 1.05em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: #2f855a;
+  animation: typing-caret-blink 1s step-end infinite;
+}
+
+@keyframes typing-caret-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}

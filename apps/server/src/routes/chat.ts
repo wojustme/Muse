@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
+import type { ServerResponse } from "node:http";
 import { and, asc, eq } from "drizzle-orm";
 import {
-  generateText,
+  smoothStream,
   stepCountIs,
+  streamText,
   type LanguageModel,
   type ModelMessage,
   type StepResult,
@@ -72,6 +74,28 @@ function tokenCount(value: number | undefined): number | null {
 
 function jsonStringify(value: unknown): string {
   return JSON.stringify(value ?? null);
+}
+
+// SSE 事件写入：每个事件是一行 `data: <json>\n\n`，前端按 event.type 分流处理。
+function writeSseEvent(raw: ServerResponse, event: Record<string, unknown>) {
+  raw.write(`data: ${JSON.stringify(event)}\n\n`);
+}
+
+// 判断首个非空白字符是否为 CJK（中日韩），用于让中文也能逐字输出。
+const CJK_PATTERN =
+  /[\u3000-\u303f\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff00-\uffef]/;
+
+// smoothStream 的自定义分块：CJK 逐字吐出，拉丁文按「词 + 尾随空白」吐出，
+// 兼顾中文打字机效果与英文的自然节奏。返回值必须是 buffer 的前缀。
+function typewriterChunking(buffer: string): string | undefined | null {
+  const firstNonSpace = buffer.match(/\S/);
+
+  if (firstNonSpace && CJK_PATTERN.test(firstNonSpace[0])) {
+    return buffer.slice(0, (firstNonSpace.index ?? 0) + 1);
+  }
+
+  const wordMatch = /\S+\s+/.exec(buffer);
+  return wordMatch ? buffer.slice(0, wordMatch.index) + wordMatch[0] : null;
 }
 
 function fallbackToolMetadata(toolName: string): MuseToolMetadata {
@@ -271,6 +295,9 @@ export async function chatRoutes(app: FastifyInstance) {
       });
     }
 
+    // 收窄后固化，避免在异步闭包里丢失 apiKey 的非空判定。
+    const apiKey = model.apiKey;
+
     const prompt = parsed.data.message.parts
       .map((part) => part.text)
       .join("\n")
@@ -378,140 +405,207 @@ export async function chatRoutes(app: FastifyInstance) {
       });
     });
 
-    let result: Awaited<ReturnType<typeof generateText>>;
+    // SSE 响应：直接接管底层 socket 写 event-stream。
+    // reply.hijack() 让 Fastify 不再管理响应生命周期，避免它按普通响应
+    // 计算 content-length / 走 onSend 钩子而把流“压平”成空响应。
+    const raw = reply.raw;
+    // 客户端断开时中止模型流，避免继续消耗额度与句柄。
+    const abortController = new AbortController();
+    request.raw.on("close", () => abortController.abort());
 
-    try {
-      result = await generateText({
-        model: buildDeepSeekLanguageModel({
-          apiKey: model.apiKey,
-          baseUrl: model.baseUrl,
-          modelName: model.modelName,
-        }),
-        system: systemPrompt,
-        messages,
-        tools: toolRegistry.tools,
-        stopWhen: stepCountIs(5),
-      });
-    } catch (error) {
-      const failedAt = new Date();
-      const message = errorMessage(error);
-
-      request.log.error({ err: error }, "deepseek model call failed");
-
-      await db.transaction(async (tx) => {
-        await tx
-          .update(modelRuns)
-          .set({
-            status: "failed",
-            errorMessage: message,
-            completedAt: failedAt,
-          })
-          .where(eq(modelRuns.id, runId));
-
-        await tx
-          .update(chatSessions)
-          .set({
-            title: nextTitle,
-            modelProvider: model.provider,
-            modelName: model.modelName,
-            aiModelId: model.id,
-            messageCount: sessionMessageCount + 1,
-            lastMessagePreview: previewFromText(prompt),
-            lastMessageAt: failedAt,
-            updatedAt: failedAt,
-          })
-          .where(eq(chatSessions.id, sessionId));
-      });
-
-      return reply.status(502).send({
-        error: "Model call failed",
-        message,
-      });
+    // hijack 会跳过 @fastify/cors 的 onSend，这里手动补齐 CORS（等价 origin:true 的回显）。
+    const requestOrigin = request.headers.origin;
+    if (requestOrigin) {
+      raw.setHeader("access-control-allow-origin", requestOrigin);
+      raw.setHeader("vary", "Origin");
+      raw.setHeader("access-control-allow-credentials", "true");
     }
+    raw.setHeader("content-type", "text/event-stream; charset=utf-8");
+    raw.setHeader("cache-control", "no-cache, no-transform");
+    raw.setHeader("connection", "keep-alive");
+    raw.setHeader("x-accel-buffering", "no");
 
-    const completedAt = new Date();
-    const assistantText = result.text.trim() || "模型返回了空响应。";
-    const assistantParts = [{ type: "text", text: assistantText }];
-    const persistedToolCalls = await persistToolCalls({
-      steps: result.steps,
-      metadataByName: toolRegistry.metadataByName,
-      modelRunId: runId,
-      sessionId,
-      userId,
-      log: request.log,
+    reply.hijack();
+    raw.flushHeaders();
+
+    // 复用原有的会话/消息元信息组织成 session payload，供起始与结束事件下发。
+    const buildSessionPayload = (
+      updatedAt: Date,
+      preview: string,
+      messageDelta: number,
+    ) => ({
+      id: sessionId,
+      title: nextTitle,
+      updatedAt: updatedAt.toISOString(),
+      modelProvider: model.provider,
+      modelName: model.modelName,
+      messageCount: sessionMessageCount + messageDelta,
+      lastMessagePreview: preview,
     });
 
-    await db.transaction(async (tx) => {
-      await tx.insert(chatMessages).values({
-        id: assistantMessageId,
-        sessionId,
-        userId,
-        role: "assistant",
-        content: assistantText,
-        parts: JSON.stringify(assistantParts),
-        modelProvider: model.provider,
-        modelName: model.modelName,
-        aiModelId: model.id,
-        status: "completed",
-        createdAt: completedAt,
-        updatedAt: completedAt,
-      });
-
-      await tx
-        .update(modelRuns)
-        .set({
-          responseMessageId: assistantMessageId,
-          status: "completed",
-          promptTokens: tokenCount(result.usage.inputTokens),
-          completionTokens: tokenCount(result.usage.outputTokens),
-          totalTokens: tokenCount(result.usage.totalTokens),
-          completedAt,
-        })
-        .where(eq(modelRuns.id, runId));
-
-      await tx
-        .update(chatSessions)
-        .set({
-          title: nextTitle,
-          modelProvider: model.provider,
-          modelName: model.modelName,
-          aiModelId: model.id,
-          messageCount: sessionMessageCount + 2,
-          lastMessagePreview: previewFromText(assistantText),
-          lastMessageAt: completedAt,
-          updatedAt: completedAt,
-        })
-        .where(eq(chatSessions.id, sessionId));
-    });
-
-    return {
+    // 起始事件：把消息/会话 id 先告诉前端，便于其创建占位的 assistant 气泡。
+    writeSseEvent(raw, {
+      type: "start",
       id: assistantMessageId,
       sessionId,
       role: "assistant",
-      parts: assistantParts,
-      createdAt: completedAt.toISOString(),
-      model: {
-        provider: model.provider,
-        name: model.modelName,
-      },
-      toolCalls: persistedToolCalls.map((toolCall) => ({
-        id: toolCall.id,
-        toolCallId: toolCall.toolCallId,
-        name: toolCall.toolName,
-        source: toolCall.toolSource,
-        riskLevel: toolCall.riskLevel,
-        status: toolCall.status,
-        requiresApproval: toolCall.requiresApproval,
-      })),
-      session: {
-        id: sessionId,
-        title: nextTitle,
-        updatedAt: completedAt.toISOString(),
-        modelProvider: model.provider,
-        modelName: model.modelName,
-        messageCount: sessionMessageCount + 2,
-        lastMessagePreview: previewFromText(assistantText),
-      },
-    };
+      model: { provider: model.provider, name: model.modelName },
+      session: buildSessionPayload(now, previewFromText(prompt), 1),
+    });
+
+    void (async () => {
+      try {
+        const result = streamText({
+          model: buildDeepSeekLanguageModel({
+            apiKey,
+            baseUrl: model.baseUrl,
+            modelName: model.modelName,
+          }),
+          system: systemPrompt,
+          messages,
+          tools: toolRegistry.tools,
+          stopWhen: stepCountIs(5),
+          // 平滑分块 + 小延迟，让前端呈现自然的打字机节奏（中文逐字、英文逐词）。
+          experimental_transform: smoothStream({
+            delayInMs: 12,
+            chunking: typewriterChunking,
+          }),
+          abortSignal: abortController.signal,
+        });
+
+        // 逐段把文本增量推给前端。
+        for await (const delta of result.textStream) {
+          if (delta) {
+            writeSseEvent(raw, { type: "delta", text: delta });
+          }
+        }
+
+        const [finalText, steps, usage] = await Promise.all([
+          result.text,
+          result.steps,
+          result.totalUsage,
+        ]);
+
+        const completedAt = new Date();
+        const assistantText = finalText.trim() || "模型返回了空响应。";
+        const assistantParts = [{ type: "text", text: assistantText }];
+        const persistedToolCalls = await persistToolCalls({
+          steps,
+          metadataByName: toolRegistry.metadataByName,
+          modelRunId: runId,
+          sessionId,
+          userId,
+          log: request.log,
+        });
+
+        await db.transaction(async (tx) => {
+          await tx.insert(chatMessages).values({
+            id: assistantMessageId,
+            sessionId,
+            userId,
+            role: "assistant",
+            content: assistantText,
+            parts: JSON.stringify(assistantParts),
+            modelProvider: model.provider,
+            modelName: model.modelName,
+            aiModelId: model.id,
+            status: "completed",
+            createdAt: completedAt,
+            updatedAt: completedAt,
+          });
+
+          await tx
+            .update(modelRuns)
+            .set({
+              responseMessageId: assistantMessageId,
+              status: "completed",
+              promptTokens: tokenCount(usage.inputTokens),
+              completionTokens: tokenCount(usage.outputTokens),
+              totalTokens: tokenCount(usage.totalTokens),
+              completedAt,
+            })
+            .where(eq(modelRuns.id, runId));
+
+          await tx
+            .update(chatSessions)
+            .set({
+              title: nextTitle,
+              modelProvider: model.provider,
+              modelName: model.modelName,
+              aiModelId: model.id,
+              messageCount: sessionMessageCount + 2,
+              lastMessagePreview: previewFromText(assistantText),
+              lastMessageAt: completedAt,
+              updatedAt: completedAt,
+            })
+            .where(eq(chatSessions.id, sessionId));
+        });
+
+        // 终止事件：下发最终文本、工具调用与会话元信息，前端据此定稿气泡。
+        writeSseEvent(raw, {
+          type: "done",
+          id: assistantMessageId,
+          sessionId,
+          role: "assistant",
+          parts: assistantParts,
+          createdAt: completedAt.toISOString(),
+          model: { provider: model.provider, name: model.modelName },
+          toolCalls: persistedToolCalls.map((toolCall) => ({
+            id: toolCall.id,
+            toolCallId: toolCall.toolCallId,
+            name: toolCall.toolName,
+            source: toolCall.toolSource,
+            riskLevel: toolCall.riskLevel,
+            status: toolCall.status,
+            requiresApproval: toolCall.requiresApproval,
+          })),
+          session: buildSessionPayload(
+            completedAt,
+            previewFromText(assistantText),
+            2,
+          ),
+        });
+      } catch (error) {
+        const failedAt = new Date();
+        const message = errorMessage(error);
+
+        request.log.error({ err: error }, "deepseek model stream failed");
+
+        await db.transaction(async (tx) => {
+          await tx
+            .update(modelRuns)
+            .set({
+              status: "failed",
+              errorMessage: message,
+              completedAt: failedAt,
+            })
+            .where(eq(modelRuns.id, runId));
+
+          await tx
+            .update(chatSessions)
+            .set({
+              title: nextTitle,
+              modelProvider: model.provider,
+              modelName: model.modelName,
+              aiModelId: model.id,
+              messageCount: sessionMessageCount + 1,
+              lastMessagePreview: previewFromText(prompt),
+              lastMessageAt: failedAt,
+              updatedAt: failedAt,
+            })
+            .where(eq(chatSessions.id, sessionId));
+        });
+
+        // 错误事件：前端据此提示失败并回收占位气泡。
+        writeSseEvent(raw, {
+          type: "error",
+          error: "Model call failed",
+          message,
+        });
+      } finally {
+        // 结束 SSE 流；push(null) 触发底层响应的 end。
+        raw.end();
+      }
+    })();
   });
 }
