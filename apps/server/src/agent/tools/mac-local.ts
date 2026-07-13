@@ -1,6 +1,77 @@
+import { randomUUID } from "node:crypto";
 import { tool } from "ai";
 import { z } from "zod";
 import type { ToolExecutionContext } from "../types.js";
+
+const toolPresentation = {
+  Read: {
+    source: "local",
+    riskLevel: "read",
+    requiresApproval: false,
+  },
+  Grep: {
+    source: "local",
+    riskLevel: "read",
+    requiresApproval: false,
+  },
+  LS: {
+    source: "local",
+    riskLevel: "read",
+    requiresApproval: false,
+  },
+  Write: {
+    source: "local",
+    riskLevel: "write",
+    requiresApproval: true,
+  },
+  Edit: {
+    source: "local",
+    riskLevel: "write",
+    requiresApproval: true,
+  },
+  Bash: {
+    source: "local",
+    riskLevel: "dangerous",
+    requiresApproval: true,
+  },
+} as const;
+
+function summarizeLocalToolOutput(value: unknown): unknown {
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+
+  if ("content" in value && typeof value.content === "string") {
+    return {
+      ...value,
+      content:
+        value.content.length > 2000
+          ? `${value.content.slice(0, 2000)}\n[content truncated for UI]`
+          : value.content,
+    };
+  }
+
+  if ("stdout" in value || "stderr" in value) {
+    const output = value as {
+      stdout?: unknown;
+      stderr?: unknown;
+    };
+
+    return {
+      ...value,
+      stdout:
+        typeof output.stdout === "string" && output.stdout.length > 2000
+          ? `${output.stdout.slice(0, 2000)}\n[stdout truncated for UI]`
+          : output.stdout,
+      stderr:
+        typeof output.stderr === "string" && output.stderr.length > 2000
+          ? `${output.stderr.slice(0, 2000)}\n[stderr truncated for UI]`
+          : output.stderr,
+    };
+  }
+
+  return value;
+}
 
 function requireLocalToolContext(context: ToolExecutionContext) {
   if (
@@ -24,30 +95,63 @@ function requireLocalToolContext(context: ToolExecutionContext) {
 
 async function executeLocalTool(input: {
   context: ToolExecutionContext;
+  displayName: keyof typeof toolPresentation;
   toolName: string;
   arguments: unknown;
 }) {
   const local = requireLocalToolContext(input.context);
-  const result = await local.broker.execute(
-    {
-      sessionId: input.context.sessionId,
-      runId: local.runId,
-      userId: input.context.userId,
-      deviceId: local.deviceId,
-      workspaceId: local.workspaceId,
-      toolName: input.toolName,
-      arguments: input.arguments,
-    },
-    { timeoutMs: 15_000 },
-  );
+  const eventId = randomUUID();
+  const presentation = toolPresentation[input.displayName];
 
-  if (!result.success) {
-    throw new Error(
-      result.error?.message ?? "macOS local tool execution failed.",
+  input.context.onToolEvent?.({
+    type: "tool-start",
+    id: eventId,
+    name: input.displayName,
+    source: presentation.source,
+    riskLevel: presentation.riskLevel,
+    requiresApproval: presentation.requiresApproval,
+    input: input.arguments,
+  });
+
+  try {
+    const result = await local.broker.execute(
+      {
+        sessionId: input.context.sessionId,
+        runId: local.runId,
+        userId: input.context.userId,
+        deviceId: local.deviceId,
+        workspaceId: local.workspaceId,
+        toolName: input.toolName,
+        arguments: input.arguments,
+      },
+      { timeoutMs: 15_000 },
     );
-  }
 
-  return result.result;
+    if (!result.success) {
+      throw new Error(
+        result.error?.message ?? "macOS local tool execution failed.",
+      );
+    }
+
+    input.context.onToolEvent?.({
+      type: "tool-result",
+      id: eventId,
+      name: input.displayName,
+      status: "succeeded",
+      output: summarizeLocalToolOutput(result.result),
+    });
+
+    return result.result;
+  } catch (error) {
+    input.context.onToolEvent?.({
+      type: "tool-result",
+      id: eventId,
+      name: input.displayName,
+      status: "failed",
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }
 }
 
 export function createMacLocalTools(context: ToolExecutionContext) {
@@ -66,6 +170,7 @@ export function createMacLocalTools(context: ToolExecutionContext) {
       execute: async ({ path }) =>
         executeLocalTool({
           context,
+          displayName: "Read",
           toolName: "workspace.read_file",
           arguments: { path },
         }),
@@ -87,6 +192,7 @@ export function createMacLocalTools(context: ToolExecutionContext) {
       execute: async ({ query, path }) =>
         executeLocalTool({
           context,
+          displayName: "Grep",
           toolName: "workspace.search_files",
           arguments: { query, path: path ?? "." },
         }),
@@ -106,6 +212,7 @@ export function createMacLocalTools(context: ToolExecutionContext) {
       execute: async ({ path }) =>
         executeLocalTool({
           context,
+          displayName: "LS",
           toolName: "workspace.list_directory",
           arguments: { path },
         }),
@@ -129,6 +236,7 @@ export function createMacLocalTools(context: ToolExecutionContext) {
       execute: async ({ path, content }) =>
         executeLocalTool({
           context,
+          displayName: "Write",
           toolName: "workspace.write_file",
           arguments: { path, content },
         }),
@@ -155,6 +263,7 @@ export function createMacLocalTools(context: ToolExecutionContext) {
       execute: async ({ path, patch }) =>
         executeLocalTool({
           context,
+          displayName: "Edit",
           toolName: "workspace.apply_patch",
           arguments: { path, patch },
         }),
@@ -187,6 +296,7 @@ export function createMacLocalTools(context: ToolExecutionContext) {
       execute: async ({ command, cwd, timeoutMs }) =>
         executeLocalTool({
           context,
+          displayName: "Bash",
           toolName: "workspace.run_command",
           arguments: { command, cwd: cwd ?? ".", timeoutMs },
         }),

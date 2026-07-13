@@ -55,8 +55,21 @@ type Message = {
   role: "user" | "assistant";
   text: string;
   createdAt?: string;
+  toolCalls?: ToolRuntimeCall[];
   // 流式接收中：用于渲染打字机光标，接收完成后置为 false。
   streaming?: boolean;
+};
+
+type ToolRuntimeCall = {
+  id: string;
+  name: string;
+  source?: string;
+  riskLevel?: "read" | "write" | "dangerous";
+  requiresApproval?: boolean;
+  status: "running" | "succeeded" | "failed";
+  input?: unknown;
+  output?: unknown;
+  error?: string;
 };
 
 type ModelSelection = {
@@ -151,6 +164,22 @@ function presetToWorkspace(
     displayName: preset.displayName,
     rootPath: joinHome(home, preset.relative),
   };
+}
+
+function homeWorkspace(home: string | null): WorkspaceBinding | null {
+  const preset = workspacePresets.find((item) => item.workspaceId === "home");
+  return preset ? presetToWorkspace(preset, home) : null;
+}
+
+function promptNeedsLocalWorkspace(prompt: string): boolean {
+  const normalized = prompt.toLowerCase();
+  return (
+    normalized.includes("本地") ||
+    normalized.includes("home") ||
+    normalized.includes("~/") ||
+    normalized.includes("目录") ||
+    normalized.includes("文件")
+  );
 }
 
 // 取路径最后一段作为自定义工作区展示名。
@@ -484,14 +513,17 @@ function UserAvatar({
 function MessageText({ message }: { message: Message }) {
   if (message.role === "assistant") {
     return (
-      <div className="message-markdown">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>
-          {message.text}
-        </ReactMarkdown>
+      <>
+        <div className="message-markdown">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            {message.text}
+          </ReactMarkdown>
+        </div>
+        <ToolCallList calls={message.toolCalls ?? []} />
         {message.streaming ? (
           <span className="typing-caret" aria-hidden="true" />
         ) : null}
-      </div>
+      </>
     );
   }
 
@@ -502,6 +534,79 @@ function MessageText({ message }: { message: Message }) {
         <span className="typing-caret" aria-hidden="true" />
       ) : null}
     </p>
+  );
+}
+
+function toolValuePreview(value: unknown): string {
+  if (value === undefined || value === null) {
+    return "";
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function ToolCallList({ calls }: { calls: ToolRuntimeCall[] }) {
+  if (!calls.length) {
+    return null;
+  }
+
+  return (
+    <div className="tool-call-list" aria-label="Tool calls">
+      {calls.map((call) => {
+        const input = toolValuePreview(call.input);
+        const output = toolValuePreview(call.output);
+        return (
+          <details
+            className={`tool-call tool-call-${call.status}`}
+            key={call.id}
+            open={call.status === "running" || call.status === "failed"}
+          >
+            <summary>
+              <span className={`tool-call-status ${call.status}`}>
+                {call.status === "running" ? (
+                  <Loader2 aria-hidden="true" size={13} strokeWidth={2.2} />
+                ) : call.status === "succeeded" ? (
+                  <Check aria-hidden="true" size={13} strokeWidth={2.2} />
+                ) : (
+                  <AlertCircle aria-hidden="true" size={13} strokeWidth={2.2} />
+                )}
+              </span>
+              <Terminal aria-hidden="true" size={14} strokeWidth={2.1} />
+              <span className="tool-call-name">{call.name}</span>
+              <span className={`tool-call-risk ${call.riskLevel ?? "read"}`}>
+                {call.requiresApproval ? "approval" : (call.riskLevel ?? "read")}
+              </span>
+            </summary>
+            <div className="tool-call-body">
+              {input ? (
+                <div>
+                  <span>Input</span>
+                  <pre>{input}</pre>
+                </div>
+              ) : null}
+              {output ? (
+                <div>
+                  <span>Output</span>
+                  <pre>{output}</pre>
+                </div>
+              ) : null}
+              {call.error ? (
+                <div>
+                  <span>Error</span>
+                  <pre>{call.error}</pre>
+                </div>
+              ) : null}
+            </div>
+          </details>
+        );
+      })}
+    </div>
   );
 }
 
@@ -538,6 +643,23 @@ async function fetchSessionMessages(sessionId: string): Promise<{
 type ChatStreamEvent =
   | { type: "start"; id: string; sessionId: string; session?: ServerSession }
   | { type: "delta"; text: string }
+  | {
+      type: "tool-start";
+      id: string;
+      name: string;
+      source?: string;
+      riskLevel?: "read" | "write" | "dangerous";
+      requiresApproval?: boolean;
+      input?: unknown;
+    }
+  | {
+      type: "tool-result";
+      id: string;
+      name: string;
+      status: "succeeded" | "failed";
+      output?: unknown;
+      error?: string;
+    }
   | {
       type: "done";
       id: string;
@@ -703,7 +825,7 @@ function ChatApp({
     null,
   );
   // 当前工作区：从 localStorage 恢复，null 表示空工作区。首次运行无存储值时用 undefined 占位，
-  // 待 HOME 目录加载后回落到默认预设（Downloads）。
+  // 待 HOME 目录加载后回落到默认预设（Home）。
   const [currentWorkspace, setCurrentWorkspace] = useState<
     WorkspaceBinding | null | undefined
   >(() => loadStoredWorkspace());
@@ -711,6 +833,8 @@ function ChatApp({
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const conversationRef = useRef<HTMLDivElement | null>(null);
   const localToolBridgeRef = useRef<LocalToolBridge | null>(null);
+  const composerComposingRef = useRef(false);
+  const composerCompositionEndedAtRef = useRef(0);
 
   useEffect(() => {
     const bridge = new LocalToolBridge({
@@ -745,7 +869,7 @@ function ChatApp({
   }, []);
 
   // 加载 HOME 目录用于构造预设工作区与「浏览」默认路径。
-  // 工作区默认空（不挂载任何目录）；首次运行不回落到任何预设。
+  // 首次运行默认挂载 Home；用户显式选择空工作区后仍会持久化为空。
   useEffect(() => {
     let cancelled = false;
 
@@ -755,8 +879,8 @@ function ChatApp({
       }
       setHomeDir(home);
       setCurrentWorkspace((current) =>
-        // 已有明确选择（预设/自定义/空）时保持；首次运行（undefined）默认空工作区。
-        current !== undefined ? current : null,
+        // 已有明确选择（预设/自定义/空）时保持；首次运行（undefined）默认 Home。
+        current !== undefined ? current : homeWorkspace(home),
       );
     });
 
@@ -1230,6 +1354,16 @@ function ChatApp({
         role: "user",
         text,
       };
+      const localToolWorkspace =
+        localToolSnapshot?.workspace ??
+        (promptNeedsLocalWorkspace(text) ? homeWorkspace(homeDir) : null);
+
+      if (!localToolSnapshot?.workspace && localToolWorkspace) {
+        localToolBridgeRef.current?.setWorkspace(localToolWorkspace);
+        setCurrentWorkspace(localToolWorkspace);
+      }
+
+      const localToolDeviceId = localToolSnapshot?.deviceId;
 
       appendMessage(targetSessionId, userMessage, titleFromPrompt(text));
 
@@ -1242,13 +1376,21 @@ function ChatApp({
         body: JSON.stringify({
           sessionId: targetSessionId,
           model: selectedModel,
-          client: buildClientContext(localToolSnapshot, systemInfo),
+          client: buildClientContext(
+            localToolSnapshot && localToolWorkspace
+              ? {
+                  ...localToolSnapshot,
+                  workspace: localToolWorkspace,
+                }
+              : localToolSnapshot,
+            systemInfo,
+          ),
           // 仅在挂载了工作区时启用本地工具；空工作区不传 localTools。
           localTools:
-            localToolSnapshot && localToolSnapshot.workspace
+            localToolDeviceId && localToolWorkspace
               ? {
-                  deviceId: localToolSnapshot.deviceId,
-                  workspaceId: localToolSnapshot.workspace.workspaceId,
+                  deviceId: localToolDeviceId,
+                  workspaceId: localToolWorkspace.workspaceId,
                 }
               : undefined,
           message: {
@@ -1318,6 +1460,44 @@ function ChatApp({
             }));
             break;
           }
+          case "tool-start": {
+            ensureAssistantMessage();
+            updateMessage(targetSessionId, assistantMessageId, (message) => ({
+              ...message,
+              toolCalls: [
+                ...(message.toolCalls ?? []).filter(
+                  (toolCall) => toolCall.id !== event.id,
+                ),
+                {
+                  id: event.id,
+                  name: event.name,
+                  source: event.source,
+                  riskLevel: event.riskLevel,
+                  requiresApproval: event.requiresApproval,
+                  status: "running",
+                  input: event.input,
+                },
+              ],
+            }));
+            break;
+          }
+          case "tool-result": {
+            ensureAssistantMessage();
+            updateMessage(targetSessionId, assistantMessageId, (message) => ({
+              ...message,
+              toolCalls: (message.toolCalls ?? []).map((toolCall) =>
+                toolCall.id === event.id
+                  ? {
+                      ...toolCall,
+                      status: event.status,
+                      output: event.output,
+                      error: event.error,
+                    }
+                  : toolCall,
+              ),
+            }));
+            break;
+          }
           case "done": {
             ensureAssistantMessage();
             const finalText = event.parts?.find(
@@ -1377,10 +1557,29 @@ function ChatApp({
     );
   }
 
+  function isComposerComposing(
+    event?: KeyboardEvent<HTMLTextAreaElement>,
+  ): boolean {
+    return (
+      composerComposingRef.current ||
+      Boolean(event?.nativeEvent.isComposing) ||
+      Date.now() - composerCompositionEndedAtRef.current < 150
+    );
+  }
+
+  function handleComposerCompositionStart() {
+    composerComposingRef.current = true;
+  }
+
+  function handleComposerCompositionEnd() {
+    composerComposingRef.current = false;
+    composerCompositionEndedAtRef.current = Date.now();
+  }
+
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (
       event.key === "ArrowUp" &&
-      !event.nativeEvent.isComposing &&
+      !isComposerComposing(event) &&
       event.currentTarget.value.trim().length === 0
     ) {
       const previousText = lastUserMessageText();
@@ -1398,7 +1597,7 @@ function ChatApp({
     if (
       event.key !== "Enter" ||
       event.shiftKey ||
-      event.nativeEvent.isComposing
+      isComposerComposing(event)
     ) {
       return;
     }
@@ -1820,6 +2019,8 @@ function ChatApp({
             <form className="composer" onSubmit={handleSubmit}>
               <textarea
                 aria-label="Message"
+                onCompositionEnd={handleComposerCompositionEnd}
+                onCompositionStart={handleComposerCompositionStart}
                 onKeyDown={handleComposerKeyDown}
                 onChange={(event) => setInput(event.target.value)}
                 disabled={!selectedModel || isBootstrapping}

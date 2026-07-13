@@ -11,6 +11,7 @@ export type ToolExecutionContext = {
   deviceId?: string;
   workspaceId?: string;
   localToolBroker?: LocalToolBroker;
+  onToolEvent?: (event: MuseToolRuntimeEvent) => void;
 };
 
 export type MuseToolMetadata = {
@@ -27,3 +28,22 @@ export type RegisteredMuseTools = {
   tools: MuseToolSet;
   metadataByName: Map<string, MuseToolMetadata>;
 };
+
+export type MuseToolRuntimeEvent =
+  | {
+      type: "tool-start";
+      id: string;
+      name: string;
+      source: ToolSource;
+      riskLevel: ToolRiskLevel;
+      requiresApproval: boolean;
+      input: unknown;
+    }
+  | {
+      type: "tool-result";
+      id: string;
+      name: string;
+      status: "succeeded" | "failed";
+      output?: unknown;
+      error?: string;
+    };

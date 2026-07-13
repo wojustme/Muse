@@ -108,7 +108,7 @@ export function createBuiltinToolRegistry(
     ...timeTools,
     ...createSessionTools(context),
     ...createModelTools(context),
-    ...(env.MUSE_LOCAL_BASH_ENABLED ? createLocalBashTools() : {}),
+    ...(env.MUSE_LOCAL_BASH_ENABLED ? createLocalBashTools(context) : {}),
     ...(context.localToolBroker && context.deviceId && context.workspaceId
       ? createMacLocalTools(context)
       : {}),

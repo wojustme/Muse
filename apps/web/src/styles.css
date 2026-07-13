@@ -1089,6 +1089,120 @@ button {
   text-underline-offset: 2px;
 }
 
+.tool-call-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.tool-call {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgb(74 58 20 / 4%);
+}
+
+.tool-call summary {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 8px 10px;
+  color: var(--text-muted);
+  cursor: pointer;
+  list-style: none;
+}
+
+.tool-call summary::-webkit-details-marker {
+  display: none;
+}
+
+.tool-call-name {
+  overflow: hidden;
+  min-width: 0;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 720;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-call-status {
+  display: inline-grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  border-radius: 6px;
+}
+
+.tool-call-status.running {
+  color: var(--warn);
+  background: rgb(200 137 15 / 12%);
+}
+
+.tool-call-status.running svg {
+  animation: spin 0.9s linear infinite;
+}
+
+.tool-call-status.succeeded {
+  color: var(--success);
+  background: rgb(61 154 92 / 12%);
+}
+
+.tool-call-status.failed {
+  color: var(--danger);
+  background: rgb(200 68 42 / 12%);
+}
+
+.tool-call-risk {
+  padding: 2px 6px;
+  border-radius: 999px;
+  color: var(--text-muted);
+  background: rgb(74 58 20 / 6%);
+  font-size: 11px;
+  font-weight: 720;
+}
+
+.tool-call-risk.write,
+.tool-call-risk.dangerous {
+  color: var(--danger);
+  background: rgb(200 68 42 / 10%);
+}
+
+.tool-call-body {
+  display: grid;
+  gap: 8px;
+  padding: 0 10px 10px;
+}
+
+.tool-call-body span {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 760;
+  text-transform: uppercase;
+}
+
+.tool-call-body pre {
+  max-height: 220px;
+  margin: 0;
+  overflow: auto;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  background: rgb(255 253 247 / 70%);
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .empty-state {
   display: grid;
   align-content: center;

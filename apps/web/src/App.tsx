@@ -22,6 +22,7 @@ import {
   Settings,
   ShieldCheck,
   Sparkles,
+  Terminal,
   Trash2,
   X,
 } from "lucide-react";
@@ -45,8 +46,21 @@ type Message = {
   role: "user" | "assistant";
   text: string;
   createdAt?: string;
+  toolCalls?: ToolRuntimeCall[];
   // 流式接收中：用于渲染打字机光标，接收完成后置为 false。
   streaming?: boolean;
+};
+
+type ToolRuntimeCall = {
+  id: string;
+  name: string;
+  source?: string;
+  riskLevel?: "read" | "write" | "dangerous";
+  requiresApproval?: boolean;
+  status: "running" | "succeeded" | "failed";
+  input?: unknown;
+  output?: unknown;
+  error?: string;
 };
 
 type ModelSelection = {
@@ -335,14 +349,17 @@ function UserAvatar({
 function MessageText({ message }: { message: Message }) {
   if (message.role === "assistant") {
     return (
-      <div className="message-markdown">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>
-          {message.text}
-        </ReactMarkdown>
+      <>
+        <div className="message-markdown">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            {message.text}
+          </ReactMarkdown>
+        </div>
+        <ToolCallList calls={message.toolCalls ?? []} />
         {message.streaming ? (
           <span className="typing-caret" aria-hidden="true" />
         ) : null}
-      </div>
+      </>
     );
   }
 
@@ -353,6 +370,79 @@ function MessageText({ message }: { message: Message }) {
         <span className="typing-caret" aria-hidden="true" />
       ) : null}
     </p>
+  );
+}
+
+function toolValuePreview(value: unknown): string {
+  if (value === undefined || value === null) {
+    return "";
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function ToolCallList({ calls }: { calls: ToolRuntimeCall[] }) {
+  if (!calls.length) {
+    return null;
+  }
+
+  return (
+    <div className="tool-call-list" aria-label="Tool calls">
+      {calls.map((call) => {
+        const input = toolValuePreview(call.input);
+        const output = toolValuePreview(call.output);
+        return (
+          <details
+            className={`tool-call tool-call-${call.status}`}
+            key={call.id}
+            open={call.status === "running" || call.status === "failed"}
+          >
+            <summary>
+              <span className={`tool-call-status ${call.status}`}>
+                {call.status === "running" ? (
+                  <Loader2 aria-hidden="true" size={13} strokeWidth={2.2} />
+                ) : call.status === "succeeded" ? (
+                  <Check aria-hidden="true" size={13} strokeWidth={2.2} />
+                ) : (
+                  <AlertCircle aria-hidden="true" size={13} strokeWidth={2.2} />
+                )}
+              </span>
+              <Terminal aria-hidden="true" size={14} strokeWidth={2.1} />
+              <span className="tool-call-name">{call.name}</span>
+              <span className={`tool-call-risk ${call.riskLevel ?? "read"}`}>
+                {call.requiresApproval ? "approval" : (call.riskLevel ?? "read")}
+              </span>
+            </summary>
+            <div className="tool-call-body">
+              {input ? (
+                <div>
+                  <span>Input</span>
+                  <pre>{input}</pre>
+                </div>
+              ) : null}
+              {output ? (
+                <div>
+                  <span>Output</span>
+                  <pre>{output}</pre>
+                </div>
+              ) : null}
+              {call.error ? (
+                <div>
+                  <span>Error</span>
+                  <pre>{call.error}</pre>
+                </div>
+              ) : null}
+            </div>
+          </details>
+        );
+      })}
+    </div>
   );
 }
 
@@ -389,6 +479,23 @@ async function fetchSessionMessages(sessionId: string): Promise<{
 type ChatStreamEvent =
   | { type: "start"; id: string; sessionId: string; session?: ServerSession }
   | { type: "delta"; text: string }
+  | {
+      type: "tool-start";
+      id: string;
+      name: string;
+      source?: string;
+      riskLevel?: "read" | "write" | "dangerous";
+      requiresApproval?: boolean;
+      input?: unknown;
+    }
+  | {
+      type: "tool-result";
+      id: string;
+      name: string;
+      status: "succeeded" | "failed";
+      output?: unknown;
+      error?: string;
+    }
   | {
       type: "done";
       id: string;
@@ -549,6 +656,8 @@ function ChatApp({
   );
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const conversationRef = useRef<HTMLDivElement | null>(null);
+  const composerComposingRef = useRef(false);
+  const composerCompositionEndedAtRef = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -1072,6 +1181,44 @@ function ChatApp({
             }));
             break;
           }
+          case "tool-start": {
+            ensureAssistantMessage();
+            updateMessage(targetSessionId, assistantMessageId, (message) => ({
+              ...message,
+              toolCalls: [
+                ...(message.toolCalls ?? []).filter(
+                  (toolCall) => toolCall.id !== event.id,
+                ),
+                {
+                  id: event.id,
+                  name: event.name,
+                  source: event.source,
+                  riskLevel: event.riskLevel,
+                  requiresApproval: event.requiresApproval,
+                  status: "running",
+                  input: event.input,
+                },
+              ],
+            }));
+            break;
+          }
+          case "tool-result": {
+            ensureAssistantMessage();
+            updateMessage(targetSessionId, assistantMessageId, (message) => ({
+              ...message,
+              toolCalls: (message.toolCalls ?? []).map((toolCall) =>
+                toolCall.id === event.id
+                  ? {
+                      ...toolCall,
+                      status: event.status,
+                      output: event.output,
+                      error: event.error,
+                    }
+                  : toolCall,
+              ),
+            }));
+            break;
+          }
           case "done": {
             ensureAssistantMessage();
             const finalText = event.parts?.find(
@@ -1131,10 +1278,29 @@ function ChatApp({
     );
   }
 
+  function isComposerComposing(
+    event?: KeyboardEvent<HTMLTextAreaElement>,
+  ): boolean {
+    return (
+      composerComposingRef.current ||
+      Boolean(event?.nativeEvent.isComposing) ||
+      Date.now() - composerCompositionEndedAtRef.current < 150
+    );
+  }
+
+  function handleComposerCompositionStart() {
+    composerComposingRef.current = true;
+  }
+
+  function handleComposerCompositionEnd() {
+    composerComposingRef.current = false;
+    composerCompositionEndedAtRef.current = Date.now();
+  }
+
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (
       event.key === "ArrowUp" &&
-      !event.nativeEvent.isComposing &&
+      !isComposerComposing(event) &&
       event.currentTarget.value.trim().length === 0
     ) {
       const previousText = lastUserMessageText();
@@ -1152,7 +1318,7 @@ function ChatApp({
     if (
       event.key !== "Enter" ||
       event.shiftKey ||
-      event.nativeEvent.isComposing
+      isComposerComposing(event)
     ) {
       return;
     }
@@ -1474,6 +1640,8 @@ function ChatApp({
             <form className="composer" onSubmit={handleSubmit}>
               <textarea
                 aria-label="Message"
+                onCompositionEnd={handleComposerCompositionEnd}
+                onCompositionStart={handleComposerCompositionStart}
                 onKeyDown={handleComposerKeyDown}
                 onChange={(event) => setInput(event.target.value)}
                 disabled={!selectedModel || isBootstrapping}

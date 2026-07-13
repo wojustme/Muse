@@ -380,6 +380,7 @@ export async function chatRoutes(app: FastifyInstance) {
           sessionId,
           userId,
         });
+    let raw: ServerResponse | null = null;
     const toolRegistry = createBuiltinToolRegistry({
       userId,
       sessionId,
@@ -387,6 +388,12 @@ export async function chatRoutes(app: FastifyInstance) {
       deviceId: parsed.data.localTools?.deviceId,
       workspaceId: parsed.data.localTools?.workspaceId,
       localToolBroker,
+      onToolEvent: (event) => {
+        if (!raw || raw.writableEnded) {
+          return;
+        }
+        writeSseEvent(raw, event);
+      },
     });
     const availableToolNames = Object.keys(toolRegistry.tools);
     const localToolsEnabled = Boolean(
@@ -472,7 +479,7 @@ export async function chatRoutes(app: FastifyInstance) {
     // SSE 响应：直接接管底层 socket 写 event-stream。
     // reply.hijack() 让 Fastify 不再管理响应生命周期，避免它按普通响应
     // 计算 content-length / 走 onSend 钩子而把流“压平”成空响应。
-    const raw = reply.raw;
+    raw = reply.raw;
     // 客户端断开时中止模型流，避免继续消耗额度与句柄。
     const abortController = new AbortController();
     request.raw.on("close", () => abortController.abort());

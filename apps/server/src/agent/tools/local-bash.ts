@@ -1,9 +1,11 @@
 import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { realpath } from "node:fs/promises";
 import { promisify } from "node:util";
 import { tool } from "ai";
 import { z } from "zod";
 import { env } from "../../config/env.js";
+import type { ToolExecutionContext } from "../types.js";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = "/Users/bytedance/codes/my/Muse";
@@ -27,6 +29,22 @@ function truncateOutput(value: string): { text: string; truncated: boolean } {
   };
 }
 
+function summarizeCommandOutput<T extends { stdout?: string; stderr?: string }>(
+  result: T,
+): T {
+  return {
+    ...result,
+    stdout:
+      typeof result.stdout === "string" && result.stdout.length > 2000
+        ? `${result.stdout.slice(0, 2000)}\n[stdout truncated for UI]`
+        : result.stdout,
+    stderr:
+      typeof result.stderr === "string" && result.stderr.length > 2000
+        ? `${result.stderr.slice(0, 2000)}\n[stderr truncated for UI]`
+        : result.stderr,
+  };
+}
+
 async function resolveAllowedCwd(cwd?: string): Promise<string> {
   const requestedCwd = cwd?.trim() || repoRoot;
   const [resolvedCwd, ...resolvedRoots] = await Promise.all([
@@ -47,7 +65,7 @@ async function resolveAllowedCwd(cwd?: string): Promise<string> {
   return resolvedCwd;
 }
 
-export function createLocalBashTools() {
+export function createLocalBashTools(context?: ToolExecutionContext) {
   return {
     ServerBash: tool({
       description:
@@ -67,14 +85,45 @@ export function createLocalBashTools() {
           ),
       }),
       execute: async ({ command, cwd }) => {
+        const eventId = randomUUID();
+        context?.onToolEvent?.({
+          type: "tool-start",
+          id: eventId,
+          name: "ServerBash",
+          source: "local",
+          riskLevel: "dangerous",
+          requiresApproval: true,
+          input: { command, cwd: cwd ?? repoRoot },
+        });
+
         if (!env.MUSE_LOCAL_BASH_ENABLED) {
-          throw new Error(
-            "ServerBash is disabled. Set MUSE_LOCAL_BASH_ENABLED=true in the Muse server environment to enable it.",
-          );
+          const error =
+            "ServerBash is disabled. Set MUSE_LOCAL_BASH_ENABLED=true in the Muse server environment to enable it.";
+          context?.onToolEvent?.({
+            type: "tool-result",
+            id: eventId,
+            name: "ServerBash",
+            status: "failed",
+            error,
+          });
+          throw new Error(error);
         }
 
         const startedAt = Date.now();
-        const resolvedCwd = await resolveAllowedCwd(cwd);
+        let resolvedCwd: string;
+
+        try {
+          resolvedCwd = await resolveAllowedCwd(cwd);
+        } catch (error) {
+          context?.onToolEvent?.({
+            type: "tool-result",
+            id: eventId,
+            name: "ServerBash",
+            status: "failed",
+            error: error instanceof Error ? error.message : String(error),
+          });
+          throw error;
+        }
 
         try {
           const result = await execFileAsync("/bin/bash", ["-lc", command], {
@@ -86,7 +135,7 @@ export function createLocalBashTools() {
           const stdout = truncateOutput(result.stdout ?? "");
           const stderr = truncateOutput(result.stderr ?? "");
 
-          return {
+          const output = {
             command,
             cwd: resolvedCwd,
             exitCode: 0,
@@ -96,6 +145,16 @@ export function createLocalBashTools() {
             stdoutTruncated: stdout.truncated,
             stderrTruncated: stderr.truncated,
           };
+
+          context?.onToolEvent?.({
+            type: "tool-result",
+            id: eventId,
+            name: "ServerBash",
+            status: "succeeded",
+            output: summarizeCommandOutput(output),
+          });
+
+          return output;
         } catch (error) {
           const execError = error as {
             code?: number | string;
@@ -108,7 +167,7 @@ export function createLocalBashTools() {
           const stdout = truncateOutput(execError.stdout ?? "");
           const stderr = truncateOutput(execError.stderr ?? "");
 
-          return {
+          const output = {
             command,
             cwd: resolvedCwd,
             exitCode:
@@ -122,6 +181,17 @@ export function createLocalBashTools() {
             stderrTruncated: stderr.truncated,
             errorMessage: execError.message ?? "Command failed",
           };
+
+          context?.onToolEvent?.({
+            type: "tool-result",
+            id: eventId,
+            name: "ServerBash",
+            status: "failed",
+            output: summarizeCommandOutput(output),
+            error: execError.message ?? "Command failed",
+          });
+
+          return output;
         }
       },
     }),
