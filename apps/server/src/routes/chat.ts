@@ -50,6 +50,36 @@ const chatRequestSchema = z.object({
       workspaceId: z.string().min(1),
     })
     .optional(),
+  client: z
+    .object({
+      app: z.string().min(1).max(64).optional(),
+      runtime: z.string().min(1).max(64).optional(),
+      os: z.string().min(1).max(128).optional(),
+      osVersion: z.string().min(1).max(128).optional(),
+      platform: z.string().min(1).max(128).optional(),
+      cpuArchitecture: z.string().min(1).max(128).optional(),
+      cpuBrand: z.string().min(1).max(256).optional(),
+      hardwareConcurrency: z.number().int().positive().optional(),
+      userAgent: z.string().min(1).max(512).optional(),
+      language: z.string().min(1).max(64).optional(),
+      timezone: z.string().min(1).max(128).optional(),
+      viewport: z
+        .object({
+          width: z.number().int().positive(),
+          height: z.number().int().positive(),
+        })
+        .optional(),
+      localToolsHost: z
+        .object({
+          status: z.string().min(1).max(64).optional(),
+          deviceId: z.string().min(1).max(128).optional(),
+          workspaceId: z.string().min(1).max(128).optional(),
+          workspaceName: z.string().min(1).max(128).optional(),
+          workspaceRoot: z.string().min(1).max(512).optional(),
+        })
+        .optional(),
+    })
+    .optional(),
 });
 
 function titleFromPrompt(prompt: string): string {
@@ -124,22 +154,51 @@ function buildDeepSeekLanguageModel(input: {
 function buildLocalToolSystemPrompt(input: {
   localToolsEnabled: boolean;
   availableToolNames: string[];
+  client?: z.infer<typeof chatRequestSchema>["client"];
 }): string {
   const base = [
     "You are Muse, an AI assistant inside the Muse chat application.",
     "When tools are available, use them directly instead of claiming that a capability is unavailable.",
     `The tools registered for this request are: ${input.availableToolNames.join(", ") || "(none)"}.`,
   ];
+  const client = input.client;
+  const clientLines = client
+    ? [
+        "Client context for this request:",
+        `- app: ${client.app ?? "unknown"}`,
+        `- runtime: ${client.runtime ?? "unknown"}`,
+        `- operating system: ${client.os ?? "unknown"}`,
+        `- operating system version: ${client.osVersion ?? "unknown"}`,
+        `- platform: ${client.platform ?? "unknown"}`,
+        `- CPU architecture: ${client.cpuArchitecture ?? "unknown"}`,
+        `- CPU brand: ${client.cpuBrand ?? "unknown"}`,
+        `- hardware concurrency: ${client.hardwareConcurrency ?? "unknown"}`,
+        `- language: ${client.language ?? "unknown"}`,
+        `- timezone: ${client.timezone ?? "unknown"}`,
+        client.viewport
+          ? `- viewport: ${client.viewport.width}x${client.viewport.height}`
+          : "- viewport: unknown",
+        client.localToolsHost
+          ? `- local tool host: status=${client.localToolsHost.status ?? "unknown"}, deviceId=${client.localToolsHost.deviceId ?? "unknown"}, workspaceId=${client.localToolsHost.workspaceId ?? "unknown"}, workspace=${client.localToolsHost.workspaceName ?? "unknown"}, workspaceRoot=${client.localToolsHost.workspaceRoot ?? "unknown"}`
+          : "- local tool host: not reported",
+        client.userAgent ? `- user agent: ${client.userAgent}` : null,
+        "Use this client context to choose tools and explain platform-specific behavior accurately.",
+      ].filter((line): line is string => Boolean(line))
+    : [
+        "Client context for this request was not reported. Avoid assuming the user's client OS or runtime.",
+      ];
 
   if (!input.localToolsEnabled) {
     return [
       ...base,
+      ...clientLines,
       "macOS local tools are not connected for this request. If the user asks you to inspect local files, explain that they need to connect the Muse macOS Local Tool Host first.",
     ].join("\n");
   }
 
   return [
     ...base,
+    ...clientLines,
     "macOS local tools are connected for this request if the registered tool list includes Read, Grep, LS, Write, Edit, or Bash.",
     "Use LS to list directories inside the attached macOS workspace.",
     "Use Read to read a text file inside the attached macOS workspace.",
@@ -340,6 +399,7 @@ export async function chatRoutes(app: FastifyInstance) {
     const systemPrompt = buildLocalToolSystemPrompt({
       localToolsEnabled,
       availableToolNames,
+      client: parsed.data.client,
     });
     const messages: ModelMessage[] = [
       ...history,

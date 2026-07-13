@@ -91,6 +91,46 @@ type ServerMessage = {
 
 const serverUrl = import.meta.env.VITE_SERVER_URL ?? "http://127.0.0.1:8787";
 
+function detectClientOs(): string {
+  const platform = navigator.platform.toLowerCase();
+  const userAgent = navigator.userAgent.toLowerCase();
+
+  if (platform.includes("mac") || userAgent.includes("mac os x")) {
+    return "macOS";
+  }
+  if (platform.includes("win") || userAgent.includes("windows")) {
+    return "Windows";
+  }
+  if (platform.includes("linux") || userAgent.includes("linux")) {
+    return "Linux";
+  }
+  if (/iphone|ipad|ipod/.test(userAgent)) {
+    return "iOS";
+  }
+  if (userAgent.includes("android")) {
+    return "Android";
+  }
+
+  return "unknown";
+}
+
+function buildClientContext() {
+  return {
+    app: "Muse Web",
+    runtime: "browser",
+    os: detectClientOs(),
+    platform: navigator.platform || "unknown",
+    hardwareConcurrency: navigator.hardwareConcurrency,
+    userAgent: navigator.userAgent,
+    language: navigator.language,
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    viewport: {
+      width: window.innerWidth,
+      height: window.innerHeight,
+    },
+  };
+}
+
 function modelKey(model: ModelSelection): string {
   return `${model.provider}:${model.name}`;
 }
@@ -964,6 +1004,7 @@ function ChatApp({
         body: JSON.stringify({
           sessionId: targetSessionId,
           model: selectedModel,
+          client: buildClientContext(),
           message: {
             id: userMessage.id,
             role: "user",
