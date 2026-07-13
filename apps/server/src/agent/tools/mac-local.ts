@@ -52,7 +52,7 @@ async function executeLocalTool(input: {
 
 export function createMacLocalTools(context: ToolExecutionContext) {
   return {
-    mac_read_file: tool({
+    Read: tool({
       description:
         "Read a text file on the user's macOS device inside the attached workspace. Use this for local project files instead of accessing the server filesystem.",
       inputSchema: z.object({
@@ -71,7 +71,7 @@ export function createMacLocalTools(context: ToolExecutionContext) {
         }),
     }),
 
-    mac_search_files: tool({
+    Grep: tool({
       description:
         "Search text files on the user's macOS device inside the attached workspace.",
       inputSchema: z.object({
@@ -92,7 +92,7 @@ export function createMacLocalTools(context: ToolExecutionContext) {
         }),
     }),
 
-    mac_list_directory: tool({
+    LS: tool({
       description:
         "List files and directories on the user's macOS device inside the attached workspace. Use this instead of shell commands when the user asks to inspect a local directory such as ls -al.",
       inputSchema: z.object({
@@ -111,7 +111,7 @@ export function createMacLocalTools(context: ToolExecutionContext) {
         }),
     }),
 
-    mac_write_file: tool({
+    Write: tool({
       description:
         "Create or overwrite a text file on the user's macOS device inside the attached workspace. Use this for local file creation or full-file replacement instead of shell redirection. The desktop client will ask the user to confirm before writing.",
       inputSchema: z.object({
@@ -134,7 +134,7 @@ export function createMacLocalTools(context: ToolExecutionContext) {
         }),
     }),
 
-    mac_apply_patch: tool({
+    Edit: tool({
       description:
         "Apply a unified diff patch to an existing text file on the user's macOS device inside the attached workspace. Prefer this for targeted edits to existing files. The desktop client will show the patch and ask the user to confirm before writing.",
       inputSchema: z.object({
@@ -160,7 +160,7 @@ export function createMacLocalTools(context: ToolExecutionContext) {
         }),
     }),
 
-    mac_local_bash: tool({
+    Bash: tool({
       description:
         "Run a bash command on the user's macOS device inside the attached workspace. Use this for local command requests such as listing files, reading files with cat, creating files, editing files, or running project commands. This is high risk and the desktop client will ask the user to confirm before execution.",
       inputSchema: z.object({

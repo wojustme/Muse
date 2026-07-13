@@ -49,7 +49,7 @@ async function resolveAllowedCwd(cwd?: string): Promise<string> {
 
 export function createLocalBashTools() {
   return {
-    local_bash_run: tool({
+    ServerBash: tool({
       description:
         "Run a local bash command on the Muse server host. Use only when the user explicitly asks to execute a local shell command. Commands are high risk; prefer read-only inspection commands unless the user asks for changes.",
       inputSchema: z.object({
@@ -69,7 +69,7 @@ export function createLocalBashTools() {
       execute: async ({ command, cwd }) => {
         if (!env.MUSE_LOCAL_BASH_ENABLED) {
           throw new Error(
-            "local_bash_run is disabled. Set MUSE_LOCAL_BASH_ENABLED=true in the Muse server environment to enable it.",
+            "ServerBash is disabled. Set MUSE_LOCAL_BASH_ENABLED=true in the Muse server environment to enable it.",
           );
         }
 

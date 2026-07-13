@@ -2,7 +2,7 @@ import { tool } from "ai";
 import { z } from "zod";
 
 export const timeTools = {
-  time_now: tool({
+  muse_time_now: tool({
     description:
       "Get the current date and time. Use this when the user asks about today, now, current time, or relative dates.",
     inputSchema: z.object({

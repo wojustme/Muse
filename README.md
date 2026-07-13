@@ -61,7 +61,7 @@ Muse 的运行时可以按四层理解：
 
 4. Agent / Tool 层
 
-   Chat 路由在每次模型调用前创建工具注册表。内置工具包括时间、当前会话、消息搜索、可用模型列表；高风险的 `local_bash_run` 需要通过环境变量显式打开；桌面端连接后还会注册 `mac_*` 工具，把模型工具调用转发给本机 Tauri command。
+   Chat 路由在每次模型调用前创建工具注册表。内置 Muse 工具使用 `muse_*` 前缀，覆盖时间、当前会话、消息搜索和可用模型列表；高风险的 `ServerBash` 需要通过环境变量显式打开；桌面端连接后还会注册 `Read`、`Grep`、`LS`、`Write`、`Edit`、`Bash` 这组接近 Claude Code/Codex 风格的 workspace 工具，把模型工具调用转发给本机 Tauri command。
 
 ## 本地开发
 
@@ -296,11 +296,11 @@ Muse 的工具体系分为三类：
 
 1. 内置只读工具
 
-   包括 `time_now`、`session_get_current`、`session_list_messages`、`session_search_messages`、`model_list_available`。
+   包括 `muse_time_now`、`muse_session_current`、`muse_session_messages`、`muse_search_messages`、`muse_models_available`。
 
 2. 服务端本机 bash
 
-   工具名是 `local_bash_run`，默认关闭。只有设置 `MUSE_LOCAL_BASH_ENABLED=true` 后才注册。它会把 cwd 限制在 `MUSE_LOCAL_BASH_ALLOWED_ROOTS` 下，并限制超时和输出长度。
+   工具名是 `ServerBash`，默认关闭。只有设置 `MUSE_LOCAL_BASH_ENABLED=true` 后才注册。它会把 cwd 限制在 `MUSE_LOCAL_BASH_ALLOWED_ROOTS` 下，并限制超时和输出长度。
 
 3. 桌面 macOS 工具
 
@@ -314,12 +314,12 @@ Muse 的工具体系分为三类：
 
 桌面 macOS 工具包括：
 
-- `mac_list_directory`：列出 workspace 内目录。
-- `mac_read_file`：读取 workspace 内文本文件。
-- `mac_search_files`：搜索 workspace 内文本文件。
-- `mac_write_file`：创建或覆盖文本文件，需要用户确认。
-- `mac_apply_patch`：对文本文件应用 unified diff，需要用户确认。
-- `mac_local_bash`：在 workspace 内执行 bash 命令，需要用户确认。
+- `LS`：列出 workspace 内目录。
+- `Read`：读取 workspace 内文本文件。
+- `Grep`：搜索 workspace 内文本文件。
+- `Write`：创建或覆盖文本文件，需要用户确认。
+- `Edit`：对文本文件应用 unified diff，需要用户确认。
+- `Bash`：在 workspace 内执行 bash 命令，需要用户确认。
 
 Tauri 侧安全边界：
 
@@ -410,7 +410,7 @@ pnpm --filter @muse/web run build
 - 数据库 schema 已在代码中定义，但仓库目前没有正式 migration 脚本，需要用当前 Drizzle schema 或额外 SQL 初始化表。
 - 飞书 OAuth provider 已实现，钉钉、微信、支付宝只在注册顺序注释里预留。
 - 桌面端默认 workspace 目前写死为 `/Users/bytedance/Downloads`，还不是用户可配置的多 workspace 管理。
-- `local_bash_run` 和 `mac_local_bash` 都属于高风险能力，虽然已有路径、命令和审批限制，但仍只适合可信本机开发环境。
+- `ServerBash` 和 `Bash` 都属于高风险能力，虽然已有路径、命令和审批限制，但仍只适合可信本机开发环境。
 - Tauri 生产包如何携带、启动或发现 Node.js API 服务仍需要进一步产品化设计。
 
 ## 阅读代码后的整体判断

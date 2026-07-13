@@ -140,14 +140,16 @@ function buildLocalToolSystemPrompt(input: {
 
   return [
     ...base,
-    "macOS local tools are connected for this request if the registered tool list includes mac_* tools.",
-    "Use mac_list_directory to list directories inside the attached macOS workspace.",
-    "Use mac_read_file to read a text file inside the attached macOS workspace.",
-    "Use mac_search_files to search text inside files in the attached macOS workspace.",
-    "Use mac_write_file to create or overwrite a text file after desktop approval.",
-    "Use mac_apply_patch for targeted edits to existing text files after desktop approval.",
-    "Use mac_local_bash only when the user explicitly asks to run a shell command or when no safer local tool fits.",
-    "Do not say that file reading is unavailable when mac_read_file is in the registered tool list. If you need a file path, ask for it or infer it from the user's request.",
+    "macOS local tools are connected for this request if the registered tool list includes Read, Grep, LS, Write, Edit, or Bash.",
+    "Use LS to list directories inside the attached macOS workspace.",
+    "Use Read to read a text file inside the attached macOS workspace.",
+    "Use Grep to search text inside files in the attached macOS workspace.",
+    "Use Write to create or overwrite a text file after desktop approval.",
+    "Use Edit for targeted edits to existing text files after desktop approval.",
+    "Use Bash only when the user explicitly asks to run a shell command or when no safer local tool fits.",
+    "Use ServerBash only when the user explicitly asks to operate on the Muse server host instead of the attached macOS workspace.",
+    "Muse application tools use the muse_* prefix and are for app state such as session history, available models, and current time.",
+    "Do not say that file reading is unavailable when Read is in the registered tool list. If you need a file path, ask for it or infer it from the user's request.",
   ].join("\n");
 }
 
@@ -331,7 +333,9 @@ export async function chatRoutes(app: FastifyInstance) {
     const localToolsEnabled = Boolean(
       parsed.data.localTools?.deviceId &&
         parsed.data.localTools?.workspaceId &&
-        availableToolNames.some((toolName) => toolName.startsWith("mac_")),
+        ["Read", "Grep", "LS", "Write", "Edit", "Bash"].some((toolName) =>
+          availableToolNames.includes(toolName),
+        ),
     );
     const systemPrompt = buildLocalToolSystemPrompt({
       localToolsEnabled,

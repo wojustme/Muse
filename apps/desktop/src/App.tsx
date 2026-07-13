@@ -22,6 +22,7 @@ import {
   Settings,
   ShieldCheck,
   Sparkles,
+  Terminal,
   Trash2,
   X,
 } from "lucide-react";
@@ -157,6 +158,13 @@ function formatTime(value: string | Date): string {
     month: "short",
     day: "2-digit",
   }).format(date);
+}
+
+function approvalDetail(
+  prompt: ApprovalPrompt | null,
+  label: string,
+): string | null {
+  return prompt?.details.find((detail) => detail.label === label)?.value ?? null;
 }
 
 async function fetchModels(): Promise<ModelOption[]> {
@@ -1144,6 +1152,24 @@ function ChatApp({
     });
   }
 
+  const approvalCommand = approvalDetail(approvalPrompt, "Command");
+  const approvalWorkspace = approvalDetail(approvalPrompt, "Workspace");
+  const approvalCwd = approvalDetail(approvalPrompt, "Working directory");
+  const isCommandApproval = Boolean(
+    approvalPrompt?.toolName === "workspace.run_command" && approvalCommand,
+  );
+  const approvalDetails = approvalPrompt
+    ? approvalPrompt.details.filter((detail) => {
+        if (!isCommandApproval) {
+          return true;
+        }
+
+        return !["Command", "Workspace", "Working directory"].includes(
+          detail.label,
+        );
+      })
+    : [];
+
   return (
     <main className="app-layout">
       <nav className="app-rail" aria-label="Workspace">
@@ -1654,36 +1680,79 @@ function ChatApp({
           className="approval-backdrop"
           role="dialog"
         >
-          <section className="approval-dialog">
+          <section
+            className={`approval-dialog ${
+              isCommandApproval ? "command-approval-dialog" : ""
+            }`}
+          >
             <div className="approval-header">
               <div>
-                <span>{approvalPrompt.riskLevel}</span>
-                <h2 id="approval-title">{approvalPrompt.title}</h2>
+                <span className={`approval-risk ${approvalPrompt.riskLevel}`}>
+                  {approvalPrompt.riskLevel}
+                </span>
+                <h2 id="approval-title">
+                  {isCommandApproval
+                    ? "Allow Muse to run this command?"
+                    : approvalPrompt.title}
+                </h2>
               </div>
-              <ShieldCheck aria-hidden="true" size={22} strokeWidth={2.1} />
+              {isCommandApproval ? (
+                <Terminal aria-hidden="true" size={22} strokeWidth={2.1} />
+              ) : (
+                <ShieldCheck aria-hidden="true" size={22} strokeWidth={2.1} />
+              )}
             </div>
-            <dl className="approval-details">
-              {approvalPrompt.details.map((detail) => (
-                <div key={detail.label}>
-                  <dt>{detail.label}</dt>
-                  <dd>{detail.value}</dd>
+            {isCommandApproval ? (
+              <div className="command-approval">
+                <div className="command-approval-summary">
+                  Muse wants to execute a local shell command in the attached
+                  workspace.
                 </div>
-              ))}
-            </dl>
+                <pre className="command-approval-command">
+                  <code>{approvalCommand}</code>
+                </pre>
+                <dl className="command-approval-meta">
+                  <div>
+                    <dt>Workspace</dt>
+                    <dd>
+                      {approvalWorkspace ?? approvalPrompt.workspace.displayName}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Working Directory</dt>
+                    <dd>{approvalCwd ?? "."}</dd>
+                  </div>
+                  <div>
+                    <dt>Policy</dt>
+                    <dd>Requires approval before execution</dd>
+                  </div>
+                </dl>
+              </div>
+            ) : null}
+            {approvalDetails.length ? (
+              <dl className="approval-details">
+                {approvalDetails.map((detail) => (
+                  <div key={detail.label}>
+                    <dt>{detail.label}</dt>
+                    <dd>{detail.value}</dd>
+                  </div>
+                ))}
+              </dl>
+            ) : null}
             <div className="approval-actions">
               <button
                 className="approval-button secondary"
                 onClick={() => resolveApproval(false)}
                 type="button"
               >
-                Reject
+                {isCommandApproval ? "Don't run" : "Reject"}
               </button>
               <button
                 className="approval-button primary"
                 onClick={() => resolveApproval(true)}
                 type="button"
               >
-                Allow
+                {isCommandApproval ? "Run command" : "Allow"}
               </button>
             </div>
           </section>

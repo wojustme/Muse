@@ -50,7 +50,7 @@ async function getOwnedSession(input: { sessionId: string; userId: string }) {
 
 export function createSessionTools(context: ToolExecutionContext) {
   return {
-    session_get_current: tool({
+    muse_session_current: tool({
       description:
         "Get metadata for the current Muse chat session, including title, selected model, message count, and update time.",
       inputSchema: z.object({}),
@@ -68,7 +68,7 @@ export function createSessionTools(context: ToolExecutionContext) {
       },
     }),
 
-    session_list_messages: tool({
+    muse_session_messages: tool({
       description:
         "List recent messages from the current Muse chat session. Use this to inspect earlier conversation turns.",
       inputSchema: z.object({
@@ -104,7 +104,7 @@ export function createSessionTools(context: ToolExecutionContext) {
       },
     }),
 
-    session_search_messages: tool({
+    muse_search_messages: tool({
       description:
         "Search the current user's Muse chat messages by keyword. Use this when the user asks to find prior discussion or recall previous context.",
       inputSchema: z.object({

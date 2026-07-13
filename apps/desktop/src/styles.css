@@ -999,6 +999,11 @@ button {
   box-shadow: 0 24px 70px rgb(15 23 42 / 28%);
 }
 
+.command-approval-dialog {
+  gap: 14px;
+  width: min(640px, calc(100vw - 48px));
+}
+
 .approval-header {
   display: flex;
   align-items: flex-start;
@@ -1013,7 +1018,7 @@ button {
   min-width: 0;
 }
 
-.approval-header span {
+.approval-risk {
   width: fit-content;
   padding: 3px 7px;
   border-radius: 999px;
@@ -1022,6 +1027,21 @@ button {
   font-size: 11px;
   font-weight: 820;
   text-transform: uppercase;
+}
+
+.approval-risk.write {
+  color: #854d0e;
+  background: #fef3c7;
+}
+
+.approval-risk.dangerous {
+  color: #991b1b;
+  background: #fee2e2;
+}
+
+.approval-risk.read {
+  color: #14532d;
+  background: #dcfce7;
 }
 
 .approval-header h2 {
@@ -1034,6 +1054,86 @@ button {
 .approval-header svg {
   flex: 0 0 auto;
   color: #475467;
+}
+
+.command-approval-dialog .approval-header svg {
+  color: #991b1b;
+}
+
+.command-approval {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.command-approval-summary {
+  padding: 10px 12px;
+  border: 1px solid #e4eaf1;
+  border-radius: 7px;
+  color: #344054;
+  background: #f8fafc;
+  font-size: 13px;
+  font-weight: 620;
+  line-height: 1.5;
+}
+
+.command-approval-command {
+  max-height: min(260px, 38vh);
+  min-width: 0;
+  margin: 0;
+  overflow: auto;
+  padding: 12px 13px;
+  border: 1px solid #263244;
+  border-radius: 7px;
+  color: #f8fafc;
+  background: #111827;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 6%);
+}
+
+.command-approval-command code {
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.command-approval-meta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+}
+
+.command-approval-meta div {
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid #e4eaf1;
+  border-radius: 7px;
+  background: #ffffff;
+}
+
+.command-approval-meta dt {
+  margin: 0 0 5px;
+  color: #667085;
+  font-size: 11px;
+  font-weight: 780;
+  text-transform: uppercase;
+}
+
+.command-approval-meta dd {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: #111827;
+  font-size: 12px;
+  font-weight: 680;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .approval-details {
@@ -1086,6 +1186,7 @@ button {
   justify-content: flex-end;
   gap: 10px;
   min-width: 0;
+  padding-top: 2px;
 }
 
 .approval-button {
@@ -1254,6 +1355,10 @@ button {
   .approval-dialog {
     width: 100%;
     max-height: calc(100vh - 24px);
+  }
+
+  .command-approval-meta {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 

@@ -7,7 +7,7 @@ import type { ToolExecutionContext } from "../types.js";
 
 export function createModelTools(context: ToolExecutionContext) {
   return {
-    model_list_available: tool({
+    muse_models_available: tool({
       description:
         "List AI models currently available to the authenticated Muse user. Use this when the user asks which models can be used.",
       inputSchema: z.object({}),
