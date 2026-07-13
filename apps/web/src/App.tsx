@@ -13,7 +13,6 @@ import {
   Loader2,
   LogOut,
   MessageSquare,
-  Monitor,
   Paperclip,
   PanelRight,
   Plus,
@@ -38,6 +37,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { AuthUser } from "@muse/shared";
 import { authHeaders, fetchMe, logout } from "./auth/client";
+import { MuseMark, MuseWordmark } from "./BrandMark";
 import { LoginScreen } from "./auth/LoginScreen";
 
 type Message = {
@@ -251,6 +251,45 @@ function messageText(message: ServerMessage): string {
     .trim();
 
   return partText || message.content || "";
+}
+
+// 从展示名生成头像回退首字母：优先取首个非空白字符，缺省用 M（Muse）。
+function initialsFromName(name: string | undefined): string {
+  const trimmed = (name ?? "").trim();
+  const first = [...trimmed][0];
+  return first ? first.toUpperCase() : "M";
+}
+
+// 用户头像：有 avatarUrl 时展示图片，加载失败或缺省时回退到首字母底色块。
+function UserAvatar({
+  user,
+  className,
+}: {
+  user: AuthUser;
+  className?: string;
+}) {
+  const [failed, setFailed] = useState(false);
+  const showImage = Boolean(user.avatarUrl) && !failed;
+
+  return (
+    <span
+      className={className ? `account-avatar ${className}` : "account-avatar"}
+      aria-hidden="true"
+    >
+      {showImage ? (
+        <img
+          alt=""
+          onError={() => setFailed(true)}
+          referrerPolicy="no-referrer"
+          src={user.avatarUrl}
+        />
+      ) : (
+        <span className="account-avatar-fallback">
+          {initialsFromName(user.displayName)}
+        </span>
+      )}
+    </span>
+  );
 }
 
 function MessageText({ message }: { message: Message }) {
@@ -1091,8 +1130,8 @@ function ChatApp({
           <span className="traffic-maximize" />
         </div>
         <div className="window-title">
-          <Monitor aria-hidden="true" size={14} strokeWidth={2.2} />
-          <span>Muse Web</span>
+          <MuseMark size={16} spark={false} />
+          <span>Muse</span>
         </div>
         <div className="window-status">
           <span className="status-dot" />
@@ -1101,7 +1140,9 @@ function ChatApp({
       </header>
 
       <nav className="app-rail" aria-label="Workspace">
-        <div className="rail-logo">M</div>
+        <div className="rail-logo">
+          <MuseMark size={38} />
+        </div>
         <button className="rail-button active" title="Chat" type="button">
           <MessageSquare aria-hidden="true" size={20} strokeWidth={2.1} />
           <span className="sr-only">Chat</span>
@@ -1127,14 +1168,11 @@ function ChatApp({
 
       <aside className="session-sidebar" aria-label="Chat sessions">
         <div className="sidebar-brand">
-          <div className="brand-logo">M</div>
-          <div className="brand-copy">
-            <strong>Muse</strong>
-            <span>AI Chat</span>
-          </div>
+          <MuseWordmark size={34} />
         </div>
 
         <div className="sidebar-account">
+          <UserAvatar user={user} />
           <span className="account-name">
             {user.displayName ?? "Muse 用户"}
           </span>
@@ -1369,13 +1407,22 @@ function ChatApp({
               <div className="message-list" aria-live="polite">
                 {messages.map((message) => (
                   <article
-                    className={`message message-${message.role}`}
+                    className={`message-row message-row-${message.role}`}
                     key={message.id}
                   >
-                    <div className="message-role">
-                      {message.role === "assistant" ? "Muse" : "You"}
+                    <span className="message-avatar" aria-hidden="true">
+                      {message.role === "assistant" ? (
+                        <MuseMark size={34} spark={false} />
+                      ) : (
+                        <UserAvatar
+                          user={user}
+                          className="message-avatar-img"
+                        />
+                      )}
+                    </span>
+                    <div className={`message message-${message.role}`}>
+                      <MessageText message={message} />
                     </div>
-                    <MessageText message={message} />
                   </article>
                 ))}
               </div>

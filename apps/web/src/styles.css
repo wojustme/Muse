@@ -1,6 +1,68 @@
+/* ==========================================================================
+   Muse Web · Warm Cream Creative Studio
+   与桌面端共享同一套暖米黄创作工作台主题，额外提供 macOS 风窗口标题栏模拟。
+   ========================================================================== */
+
 :root {
-  color: #111827;
-  background: #f4f6f8;
+  /* 背景层级：暖米黄纸感，从基底到浮起 */
+  --bg-base: #f4efdf;
+  --bg-rail: #f8f4e8;
+  --bg-panel: #f1ead6;
+  --bg-surface: #fbf8ef;
+  --bg-elevated: #fffdf7;
+  --bg-hover: rgb(74 58 20 / 6%);
+
+  /* 半透明玻璃面（暖白，用于叠加 backdrop-filter） */
+  --glass-rail: rgb(248 244 232 / 82%);
+  --glass-sidebar: rgb(245 239 224 / 80%);
+  --glass-context: rgb(244 237 221 / 72%);
+  --glass-card: rgb(255 253 247 / 84%);
+  --glass-topbar: rgb(248 243 230 / 62%);
+  --glass-surface: rgb(255 253 247 / 90%);
+  --glass-titlebar: rgb(248 244 232 / 88%);
+
+  /* 缪斯品牌强调色（与图标一致，light 场景略加深以保证对比度） */
+  --accent: #6d5bd6;
+  --accent-soft: #6f5ed8;
+  --accent-blue: #3f7fc8;
+  --accent-gradient: linear-gradient(135deg, #8b7cff 0%, #6fb0ff 100%);
+  --accent-tint: rgb(109 91 214 / 12%);
+  --accent-tint-strong: rgb(109 91 214 / 18%);
+  --accent-line: rgb(109 91 214 / 30%);
+  --gold: #d99b2c;
+
+  /* 文字层级：深暖墨 */
+  --text: #3a3320;
+  --text-muted: #726a52;
+  --text-dim: #9c937a;
+
+  /* 描边 */
+  --border: rgb(74 58 20 / 12%);
+  --border-strong: rgb(74 58 20 / 18%);
+
+  /* 滚动条：暖色、克制 */
+  --scrollbar-thumb: rgb(74 58 20 / 20%);
+  --scrollbar-thumb-hover: rgb(74 58 20 / 34%);
+
+  /* 语义色 */
+  --success: #3d9a5c;
+  --warn: #c8890f;
+  --danger: #c8442a;
+
+  /* 圆角 */
+  --radius-card: 16px;
+  --radius-control: 12px;
+  --radius-pill: 999px;
+
+  /* 辉光与阴影（暖、柔） */
+  --glow-accent:
+    0 0 0 1px rgb(109 91 214 / 30%), 0 8px 24px rgb(109 91 214 / 20%);
+  --shadow-panel: 0 1px 2px rgb(74 58 20 / 8%);
+  --shadow-float: 0 18px 48px rgb(74 58 20 / 16%);
+  --focus-ring: 0 0 0 3px rgb(109 91 214 / 18%);
+
+  color: var(--text);
+  background: var(--bg-base);
   font-family:
     Inter,
     ui-sans-serif,
@@ -11,6 +73,11 @@
     sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+
+  /* Firefox：细滚动条 + 暖色 */
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 
 * {
@@ -22,7 +89,8 @@ body {
   min-width: 320px;
   min-height: 100vh;
   overflow: hidden;
-  background: #dfe5ec;
+  color: var(--text);
+  background: var(--bg-base);
 }
 
 button,
@@ -36,17 +104,62 @@ button {
   border: 0;
 }
 
+/* --------------------------------------------------------------------------
+   滚动条（WebKit）：细、透明轨道、圆角暖色滑块，hover 才加深。
+   -------------------------------------------------------------------------- */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: var(--radius-pill);
+  background-clip: padding-box;
+  background-color: var(--scrollbar-thumb);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--scrollbar-thumb-hover);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* --------------------------------------------------------------------------
+   总体布局：标题栏 / 图标栏 / 会话侧栏 / 对话区 / 上下文面板
+   -------------------------------------------------------------------------- */
 .app-layout {
+  position: relative;
   display: grid;
-  grid-template-columns: 64px 304px minmax(0, 1fr) 292px;
-  grid-template-rows: 38px minmax(0, 1fr);
+  grid-template-columns:
+    68px minmax(248px, 308px) minmax(360px, 1fr)
+    minmax(250px, 300px);
+  grid-template-rows: 40px minmax(0, 1fr);
   grid-template-areas:
     "title title title title"
     "rail sessions chat context";
   width: 100vw;
   height: 100vh;
   min-width: 0;
-  background: #eef2f6;
+  min-height: 0;
+  background:
+    radial-gradient(
+      1200px 600px at 78% -8%,
+      rgb(139 124 255 / 12%),
+      transparent 60%
+    ),
+    radial-gradient(
+      900px 520px at 8% 108%,
+      rgb(111 176 255 / 10%),
+      transparent 62%
+    ),
+    var(--bg-base);
 }
 
 .window-titlebar {
@@ -55,9 +168,10 @@ button {
   grid-template-columns: 180px minmax(0, 1fr) 180px;
   align-items: center;
   min-width: 0;
-  padding: 0 14px;
-  border-bottom: 1px solid #d8e0ea;
-  background: #f7f9fb;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--glass-titlebar);
+  backdrop-filter: blur(18px);
   user-select: none;
 }
 
@@ -70,8 +184,8 @@ button {
 .traffic-lights span {
   width: 12px;
   height: 12px;
-  border-radius: 999px;
-  box-shadow: inset 0 0 0 1px rgb(17 24 39 / 10%);
+  border-radius: var(--radius-pill);
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 12%);
 }
 
 .traffic-close {
@@ -92,9 +206,10 @@ button {
   justify-content: center;
   gap: 7px;
   min-width: 0;
-  color: #344054;
+  color: var(--text-muted);
   font-size: 13px;
-  font-weight: 760;
+  font-weight: 720;
+  letter-spacing: 0.2px;
 }
 
 .window-title span {
@@ -108,17 +223,17 @@ button {
   justify-content: flex-end;
   align-items: center;
   gap: 7px;
-  color: #667085;
+  color: var(--text-dim);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 660;
 }
 
 .status-dot {
   width: 8px;
   height: 8px;
-  border-radius: 999px;
-  background: #16a34a;
-  box-shadow: 0 0 0 3px rgb(22 163 74 / 14%);
+  border-radius: var(--radius-pill);
+  background: var(--success);
+  box-shadow: 0 0 0 3px rgb(61 154 92 / 16%);
 }
 
 .app-rail {
@@ -128,91 +243,117 @@ button {
   justify-items: center;
   gap: 10px;
   min-height: 0;
-  padding: 14px 10px;
-  border-right: 1px solid #d8e0ea;
-  background: #f7f9fb;
+  padding: 16px 10px;
+  border-right: 1px solid var(--border);
+  background: var(--glass-rail);
+  backdrop-filter: blur(18px);
 }
 
 .rail-logo {
   display: grid;
-  width: 38px;
-  height: 38px;
-  margin-bottom: 8px;
   place-items: center;
-  border-radius: 8px;
-  color: #ffffff;
-  background: #111827;
-  font-size: 17px;
-  font-weight: 850;
+  margin-bottom: 8px;
 }
 
 .rail-button {
+  position: relative;
   display: grid;
-  width: 40px;
-  height: 40px;
+  width: 42px;
+  height: 42px;
   place-items: center;
-  border-radius: 8px;
-  color: #667085;
+  border-radius: var(--radius-control);
+  color: var(--text-dim);
   background: transparent;
   cursor: pointer;
+  transition:
+    color 0.16s ease,
+    background 0.16s ease,
+    box-shadow 0.16s ease;
 }
 
 .rail-button:hover {
-  color: #111827;
-  background: #e8eef4;
+  color: var(--text);
+  background: var(--bg-hover);
 }
 
 .rail-button.active {
-  color: #14532d;
-  background: #dcf2e5;
-  box-shadow: inset 0 0 0 1px #cde4d5;
+  color: var(--accent);
+  background: var(--accent-tint);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+}
+
+.rail-button.active::before {
+  content: "";
+  position: absolute;
+  left: -10px;
+  width: 3px;
+  height: 20px;
+  border-radius: var(--radius-pill);
+  background: var(--accent-gradient);
+  box-shadow: 0 0 10px rgb(139 124 255 / 55%);
 }
 
 .rail-spacer {
   min-height: 0;
 }
 
+/* --------------------------------------------------------------------------
+   会话侧栏
+   -------------------------------------------------------------------------- */
 .session-sidebar {
   grid-area: sessions;
   display: grid;
   grid-template-rows: auto auto auto auto minmax(0, 1fr);
-  gap: 12px;
+  gap: 14px;
   min-width: 0;
-  padding: 16px 12px;
-  border-right: 1px solid #dce3eb;
-  background: #edf1f5;
+  padding: 18px 14px;
+  border-right: 1px solid var(--border);
+  background: var(--glass-sidebar);
+  backdrop-filter: blur(18px);
 }
 
 .sidebar-brand {
   display: flex;
   align-items: center;
-  gap: 10px;
   min-width: 0;
-  padding: 2px 4px 8px;
+  padding: 2px 4px 6px;
 }
 
-.brand-logo {
-  display: grid;
-  flex: 0 0 auto;
-  width: 34px;
-  height: 34px;
-  place-items: center;
-  border: 1px solid #0f172a;
-  border-radius: 8px;
-  color: #ffffff;
-  background: #111827;
-  font-size: 16px;
-  font-weight: 850;
+/* 品牌字标：图标 + Muse 文案 */
+.muse-wordmark {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
 }
 
-.brand-copy {
+.muse-wordmark-copy {
   display: grid;
   gap: 1px;
   min-width: 0;
 }
 
-.brand-copy strong,
-.brand-copy span,
+.muse-wordmark-copy strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: 0.2px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.muse-wordmark-copy span {
+  overflow: hidden;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.3px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .session-card-title,
 .session-card-preview {
   overflow: hidden;
@@ -220,74 +361,78 @@ button {
   white-space: nowrap;
 }
 
-.brand-copy strong {
-  color: #111827;
-  font-size: 16px;
-  line-height: 1.2;
-  font-weight: 800;
-}
-
-.brand-copy span {
-  color: #667085;
-  font-size: 12px;
-  font-weight: 650;
-}
-
 .new-chat-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  height: 38px;
-  border-radius: 8px;
+  height: 42px;
+  border-radius: var(--radius-control);
   color: #ffffff;
-  background: #14532d;
+  background: var(--accent-gradient);
   cursor: pointer;
   font-size: 14px;
-  font-weight: 760;
-  box-shadow: 0 1px 2px rgb(17 24 39 / 12%);
+  font-weight: 720;
+  letter-spacing: 0.2px;
+  box-shadow: 0 6px 18px rgb(139 124 255 / 28%);
+  transition:
+    transform 0.14s ease,
+    box-shadow 0.16s ease,
+    filter 0.16s ease;
 }
 
 .new-chat-button:hover {
-  background: #166534;
+  filter: brightness(1.04);
+  box-shadow: 0 8px 24px rgb(139 124 255 / 40%);
+  transform: translateY(-1px);
+}
+
+.new-chat-button:active {
+  transform: translateY(0);
 }
 
 .new-chat-button:disabled {
   cursor: not-allowed;
-  opacity: 0.72;
+  filter: grayscale(0.2);
+  opacity: 0.5;
+  box-shadow: none;
+  transform: none;
 }
 
 .session-search {
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 38px;
+  height: 40px;
   min-width: 0;
-  padding: 0 11px;
-  border: 1px solid #d4dce6;
-  border-radius: 8px;
-  color: #667085;
-  background: #ffffff;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  color: var(--text-dim);
+  background: var(--bg-elevated);
+  transition:
+    border-color 0.16s ease,
+    box-shadow 0.16s ease;
 }
 
 .session-search:focus-within {
-  border-color: #7aa89a;
-  box-shadow: 0 0 0 3px rgb(20 83 45 / 10%);
+  border-color: var(--accent-line);
+  box-shadow: var(--focus-ring);
 }
 
 .session-search input {
   width: 100%;
   min-width: 0;
   border: 0;
-  color: #111827;
+  color: var(--text);
   background: transparent;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 560;
   outline: none;
 }
 
 .session-search input::placeholder {
-  color: #8a95a3;
+  color: var(--text-dim);
 }
 
 .history-list {
@@ -296,7 +441,7 @@ button {
   gap: 6px;
   min-height: 0;
   overflow: auto;
-  padding-top: 6px;
+  padding-top: 4px;
 }
 
 .history-header {
@@ -304,10 +449,12 @@ button {
   align-items: center;
   justify-content: space-between;
   min-width: 0;
-  padding: 4px 4px 6px;
-  color: #667085;
-  font-size: 12px;
+  padding: 2px 4px 6px;
+  color: var(--text-dim);
+  font-size: 11px;
   font-weight: 760;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
 }
 
 .history-header strong {
@@ -315,9 +462,9 @@ button {
   min-width: 22px;
   height: 20px;
   place-items: center;
-  border-radius: 999px;
-  color: #475467;
-  background: #dfe6ee;
+  border-radius: var(--radius-pill);
+  color: var(--accent);
+  background: var(--accent-tint);
   font-size: 11px;
   font-weight: 800;
 }
@@ -333,20 +480,23 @@ button {
   width: 24px;
   height: 24px;
   place-items: center;
-  border-radius: 6px;
-  color: #667085;
+  border-radius: 7px;
+  color: var(--text-dim);
   background: transparent;
   cursor: pointer;
+  transition:
+    color 0.16s ease,
+    background 0.16s ease;
 }
 
 .history-header-actions button:hover {
-  color: #111827;
-  background: #dfe6ee;
+  color: var(--text);
+  background: var(--bg-hover);
 }
 
 .history-header-actions button:disabled {
   cursor: not-allowed;
-  opacity: 0.65;
+  opacity: 0.5;
 }
 
 .history-state {
@@ -354,54 +504,62 @@ button {
   align-items: center;
   justify-content: center;
   gap: 7px;
-  min-height: 42px;
+  min-height: 44px;
   padding: 0 10px;
-  border-radius: 8px;
-  color: #667085;
-  background: #e6ecf2;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-control);
+  color: var(--text-dim);
   font-size: 12px;
-  font-weight: 680;
+  font-weight: 620;
 }
 
 .session-card {
   display: grid;
-  grid-template-columns: 28px minmax(0, 1fr);
+  grid-template-columns: 30px minmax(0, 1fr);
   gap: 10px;
   align-items: start;
   width: 100%;
   min-width: 0;
-  padding: 10px;
+  padding: 11px 12px;
   border: 1px solid transparent;
-  border-radius: 8px;
-  color: #344054;
+  border-radius: var(--radius-control);
+  color: var(--text-muted);
   background: transparent;
   cursor: pointer;
   text-align: left;
+  transition:
+    background 0.16s ease,
+    border-color 0.16s ease,
+    transform 0.14s ease;
 }
 
 .session-card:hover {
-  background: #ffffff;
+  background: var(--bg-hover);
+  transform: translateY(-1px);
 }
 
 .session-card.active {
-  border-color: #cfd8e3;
-  background: #ffffff;
-  box-shadow: 0 1px 2px rgb(17 24 39 / 7%);
+  border-color: var(--accent-line);
+  background: var(--accent-tint);
 }
 
 .session-icon {
   display: grid;
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   place-items: center;
-  border-radius: 7px;
-  color: #667085;
-  background: #e3e9ef;
+  border-radius: 9px;
+  color: var(--text-dim);
+  background: rgb(74 58 20 / 7%);
+  transition:
+    color 0.16s ease,
+    background 0.16s ease;
 }
 
 .session-card.active .session-icon {
-  color: #14532d;
-  background: #dcf2e5;
+  color: #ffffff;
+  background: var(--accent-gradient);
+  box-shadow: 0 0 14px rgb(139 124 255 / 40%);
 }
 
 .session-card-body {
@@ -411,15 +569,15 @@ button {
 }
 
 .session-card-title {
-  color: #111827;
+  color: var(--text);
   font-size: 13px;
-  font-weight: 780;
+  font-weight: 720;
 }
 
 .session-card-preview {
-  color: #667085;
+  color: var(--text-muted);
   font-size: 12px;
-  font-weight: 560;
+  font-weight: 500;
 }
 
 .session-card-meta {
@@ -427,26 +585,29 @@ button {
   align-items: center;
   gap: 6px;
   min-width: 0;
-  color: #8a95a3;
+  color: var(--text-dim);
   font-size: 11px;
-  font-weight: 680;
+  font-weight: 620;
 }
 
 .session-card-meta span {
   overflow: hidden;
   min-width: 0;
-  color: #5b6b7d;
+  color: var(--text-dim);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* --------------------------------------------------------------------------
+   对话区外壳
+   -------------------------------------------------------------------------- */
 .chat-shell {
   grid-area: chat;
   display: grid;
-  grid-template-rows: 76px minmax(0, 1fr);
+  grid-template-rows: 78px minmax(0, 1fr);
   min-height: 0;
   min-width: 0;
-  background: #f8fafc;
+  background: transparent;
 }
 
 .context-panel {
@@ -456,21 +617,22 @@ button {
   gap: 12px;
   min-width: 0;
   min-height: 0;
-  padding: 14px;
+  padding: 16px 14px;
   overflow: auto;
-  border-left: 1px solid #d8e0ea;
-  background: #f1f5f9;
+  border-left: 1px solid var(--border);
+  background: var(--glass-context);
+  backdrop-filter: blur(18px);
 }
 
 .context-card {
   display: grid;
   gap: 12px;
   min-width: 0;
-  padding: 13px;
-  border: 1px solid #dbe3ec;
-  border-radius: 8px;
-  background: #ffffff;
-  box-shadow: 0 1px 2px rgb(17 24 39 / 5%);
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--glass-card);
+  box-shadow: var(--shadow-panel);
 }
 
 .context-card-header {
@@ -478,9 +640,11 @@ button {
   align-items: center;
   justify-content: space-between;
   min-width: 0;
-  color: #667085;
-  font-size: 12px;
+  color: var(--text-dim);
+  font-size: 11px;
   font-weight: 780;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
 }
 
 .context-card-header span {
@@ -493,9 +657,9 @@ button {
 .session-summary h2 {
   overflow: hidden;
   margin: 0;
-  color: #111827;
+  color: var(--text);
   font-size: 17px;
-  font-weight: 820;
+  font-weight: 800;
   line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -517,24 +681,24 @@ button {
 }
 
 .session-facts dt {
-  color: #667085;
+  color: var(--text-dim);
   font-size: 12px;
-  font-weight: 680;
+  font-weight: 620;
 }
 
 .session-facts dd {
   overflow: hidden;
   margin: 0;
-  color: #1f2937;
+  color: var(--text);
   font-size: 12px;
-  font-weight: 760;
+  font-weight: 720;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .runtime-list {
   display: grid;
-  gap: 10px;
+  gap: 11px;
 }
 
 .runtime-list div {
@@ -544,32 +708,38 @@ button {
 .runtime-dot {
   width: 8px;
   height: 8px;
-  border-radius: 999px;
-  background: #94a3b8;
+  border-radius: var(--radius-pill);
+  background: var(--text-dim);
 }
 
 .runtime-dot.ready {
-  background: #16a34a;
+  background: var(--success);
+  box-shadow: 0 0 0 3px rgb(61 154 92 / 16%);
+}
+
+.runtime-dot.warning {
+  background: var(--warn);
+  box-shadow: 0 0 0 3px rgb(200 137 15 / 16%);
 }
 
 .runtime-list span {
   overflow: hidden;
-  color: #475467;
+  color: var(--text-muted);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 640;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .runtime-list strong {
-  color: #111827;
+  color: var(--text);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 760;
 }
 
 .activity-list {
   display: grid;
-  gap: 9px;
+  gap: 10px;
   min-width: 0;
 }
 
@@ -577,8 +747,8 @@ button {
   display: grid;
   gap: 4px;
   min-width: 0;
-  padding-bottom: 9px;
-  border-bottom: 1px solid #edf1f5;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
 }
 
 .activity-item:last-child {
@@ -587,31 +757,40 @@ button {
 }
 
 .activity-item strong {
-  color: #344054;
+  color: var(--accent);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 780;
 }
 
 .activity-item span,
 .activity-empty {
   overflow: hidden;
-  color: #667085;
+  color: var(--text-muted);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 560;
   line-height: 1.45;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.activity-empty {
+  color: var(--text-dim);
+}
+
+/* --------------------------------------------------------------------------
+   对话区顶栏
+   -------------------------------------------------------------------------- */
 .topbar {
   display: flex;
   align-items: center;
   justify-content: flex-start;
   gap: 20px;
   min-width: 0;
-  padding: 0 28px;
-  border-bottom: 1px solid #e2e8f0;
-  background: #ffffff;
+  min-height: 0;
+  padding: 0 clamp(16px, 2.4vw, 30px);
+  border-bottom: 1px solid var(--border);
+  background: var(--glass-topbar);
+  backdrop-filter: blur(14px);
 }
 
 .session-title-block {
@@ -625,10 +804,12 @@ button {
   align-items: center;
   gap: 6px;
   width: fit-content;
-  color: #667085;
-  font-size: 12px;
+  color: var(--accent);
+  font-size: 11px;
   font-weight: 760;
+  letter-spacing: 0.6px;
   line-height: 1;
+  text-transform: uppercase;
 }
 
 .topbar h1,
@@ -640,9 +821,9 @@ button {
 
 .topbar h1 {
   overflow: hidden;
-  color: #101828;
+  color: var(--text);
   font-size: 21px;
-  font-weight: 820;
+  font-weight: 780;
   line-height: 1.16;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -653,18 +834,21 @@ button {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  height: 38px;
+  height: 40px;
   min-width: 190px;
-  padding: 0 10px;
-  border: 1px solid #d4dce6;
-  border-radius: 8px;
-  color: #14532d;
-  background: #ffffff;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  color: var(--accent);
+  background: var(--bg-elevated);
+  transition:
+    border-color 0.16s ease,
+    box-shadow 0.16s ease;
 }
 
 .model-select:focus-within {
-  border-color: #7aa89a;
-  box-shadow: 0 0 0 3px rgb(20 83 45 / 10%);
+  border-color: var(--accent-line);
+  box-shadow: var(--focus-ring);
 }
 
 .model-select select {
@@ -672,17 +856,22 @@ button {
   min-width: 0;
   appearance: none;
   border: 0;
-  color: #111827;
+  color: var(--text);
   background: transparent;
   cursor: pointer;
   font-size: 13px;
-  font-weight: 760;
+  font-weight: 700;
   outline: none;
+}
+
+.model-select select option {
+  color: var(--text);
+  background: var(--bg-elevated);
 }
 
 .model-select select:disabled {
   cursor: not-allowed;
-  color: #667085;
+  color: var(--text-dim);
 }
 
 .chat-canvas {
@@ -695,19 +884,19 @@ button {
 .app-notice {
   position: absolute;
   z-index: 4;
-  top: 12px;
+  top: 14px;
   left: 50%;
   display: inline-flex;
   align-items: center;
   gap: 8px;
   max-width: min(680px, calc(100% - 32px));
-  min-height: 36px;
-  padding: 7px 8px 7px 12px;
-  border: 1px solid #fedf89;
-  border-radius: 8px;
-  color: #7a2e0e;
-  background: #fffaeb;
-  box-shadow: 0 8px 20px rgb(17 24 39 / 10%);
+  min-height: 38px;
+  padding: 7px 8px 7px 13px;
+  border: 1px solid rgb(200 137 15 / 35%);
+  border-radius: var(--radius-control);
+  color: #7a5310;
+  background: #fdf3d6;
+  box-shadow: var(--shadow-float);
   transform: translateX(-50%);
 }
 
@@ -715,7 +904,7 @@ button {
   overflow: hidden;
   min-width: 0;
   font-size: 13px;
-  font-weight: 680;
+  font-weight: 620;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -726,68 +915,92 @@ button {
   width: 26px;
   height: 26px;
   place-items: center;
-  border-radius: 7px;
-  color: #7a2e0e;
+  border-radius: 8px;
+  color: #7a5310;
   background: transparent;
   cursor: pointer;
 }
 
 .app-notice button:hover {
-  background: #fef0c7;
+  background: rgb(122 83 16 / 10%);
 }
 
 .conversation-scroll {
   min-height: 0;
   overflow: auto;
-  padding: 26px 32px 18px;
+  padding: 28px clamp(16px, 3vw, 34px) 18px;
 }
 
 .message-list {
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
-  gap: 14px;
+  gap: 18px;
   width: min(860px, 100%);
   min-height: 100%;
   margin: 0 auto;
 }
 
+/* 消息行：头像 + 气泡，微信/飞书风格。assistant 靠左，user 靠右。 */
+.message-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+}
+
+.message-row-user {
+  flex-direction: row-reverse;
+}
+
+.message-avatar {
+  display: inline-grid;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  overflow: hidden;
+  place-items: center;
+  border-radius: 10px;
+}
+
+/* user 头像复用 account-avatar，但消息流里用方圆角与 34px 尺寸。 */
+.message-avatar .account-avatar.message-avatar-img {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+
 .message {
-  width: min(720px, 100%);
-  padding: 13px 15px;
-  border: 1px solid #e0e7ef;
-  border-radius: 8px;
-  color: #172033;
-  background: #ffffff;
-  box-shadow: 0 1px 2px rgb(17 24 39 / 4%);
+  max-width: min(640px, 82%);
+  padding: 12px 15px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  color: var(--text);
+  background: var(--glass-surface);
+  box-shadow: var(--shadow-panel);
 }
 
 .message-user {
-  align-self: flex-end;
-  border-color: #bfdccb;
-  background: #eef8f1;
+  border-color: var(--accent-line);
+  background: var(--accent-tint);
+  border-top-right-radius: 4px;
 }
 
 .message-assistant {
-  align-self: flex-start;
-}
-
-.message-role {
-  margin-bottom: 7px;
-  color: #5b6b7d;
-  font-size: 12px;
-  font-weight: 780;
+  border-top-left-radius: 4px;
 }
 
 .message p {
-  color: #1f2937;
+  color: var(--text);
   font-size: 14px;
   line-height: 1.62;
   white-space: pre-wrap;
 }
 
 .message-markdown {
-  color: #1f2937;
+  color: var(--text);
   font-size: 14px;
   line-height: 1.62;
   overflow-wrap: anywhere;
@@ -820,9 +1033,10 @@ button {
 }
 
 .message-markdown code {
-  padding: 2px 5px;
-  border-radius: 5px;
-  background: #eef2f6;
+  padding: 2px 6px;
+  border-radius: 6px;
+  color: var(--accent);
+  background: var(--accent-tint);
   font-family:
     ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
     monospace;
@@ -831,22 +1045,23 @@ button {
 
 .message-markdown pre {
   overflow: auto;
-  padding: 10px 12px;
-  border: 1px solid #d9e2ec;
-  border-radius: 7px;
-  background: #f8fafc;
+  padding: 12px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: #efe7d3;
 }
 
 .message-markdown pre code {
   padding: 0;
+  color: var(--text);
   background: transparent;
   white-space: pre;
 }
 
 .message-markdown blockquote {
-  padding-left: 11px;
-  border-left: 3px solid #cfd8e3;
-  color: #475467;
+  padding-left: 12px;
+  border-left: 3px solid var(--accent-line);
+  color: var(--text-muted);
 }
 
 .message-markdown table {
@@ -857,19 +1072,19 @@ button {
 
 .message-markdown th,
 .message-markdown td {
-  padding: 7px 9px;
-  border: 1px solid #d9e2ec;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
   text-align: left;
   vertical-align: top;
 }
 
 .message-markdown th {
-  background: #f1f5f9;
-  font-weight: 780;
+  background: rgb(74 58 20 / 6%);
+  font-weight: 760;
 }
 
 .message-markdown a {
-  color: #14532d;
+  color: var(--accent-blue);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
@@ -878,59 +1093,71 @@ button {
   display: grid;
   align-content: center;
   justify-items: center;
-  gap: 12px;
+  gap: 14px;
   width: min(620px, 100%);
   min-height: 100%;
   margin: 0 auto;
   padding-bottom: 56px;
-  color: #475467;
+  color: var(--text-muted);
   text-align: center;
 }
 
 .empty-icon {
   display: grid;
-  width: 42px;
-  height: 42px;
+  width: 56px;
+  height: 56px;
   place-items: center;
-  border: 1px solid #cde4d5;
-  border-radius: 8px;
-  color: #14532d;
-  background: #edf9f1;
+  border-radius: 18px;
+  color: #ffffff;
+  background: var(--accent-gradient);
+  box-shadow: 0 10px 30px rgb(139 124 255 / 36%);
 }
 
 .empty-state h2 {
-  color: #101828;
-  font-size: 23px;
-  font-weight: 830;
+  color: var(--text);
+  font-size: 24px;
+  font-weight: 780;
   line-height: 1.2;
 }
 
 .empty-state p {
-  max-width: 420px;
-  color: #667085;
+  max-width: 430px;
+  color: var(--text-muted);
   font-size: 14px;
-  font-weight: 560;
+  font-weight: 520;
   line-height: 1.6;
 }
 
+/* --------------------------------------------------------------------------
+   底部 Composer
+   -------------------------------------------------------------------------- */
 .bottom-dock {
-  width: min(880px, calc(100% - 64px));
+  width: min(880px, calc(100% - clamp(28px, 6vw, 68px)));
   margin: 0 auto;
-  padding: 0 0 26px;
+  padding: 0 0 clamp(16px, 3vh, 28px);
 }
 
 .composer {
   display: grid;
   grid-template-rows: minmax(58px, 1fr) auto;
   gap: 12px;
-  min-height: 132px;
-  padding: 14px;
-  border: 1px solid #cfd8e3;
-  border-radius: 8px;
-  background: #ffffff;
+  min-height: 134px;
+  padding: 15px;
+  border: 1px solid var(--border-strong);
+  border-radius: 18px;
+  background: var(--glass-surface);
+  box-shadow: var(--shadow-float);
+  backdrop-filter: blur(18px);
+  transition:
+    border-color 0.16s ease,
+    box-shadow 0.16s ease;
+}
+
+.composer:focus-within {
+  border-color: var(--accent-line);
   box-shadow:
-    0 1px 2px rgb(17 24 39 / 6%),
-    0 10px 24px rgb(17 24 39 / 8%);
+    var(--shadow-float),
+    0 0 0 1px rgb(109 91 214 / 20%);
 }
 
 .composer textarea {
@@ -939,16 +1166,16 @@ button {
   min-height: 58px;
   resize: none;
   border: 0;
-  color: #111827;
+  color: var(--text);
   background: transparent;
   font-size: 15px;
-  font-weight: 560;
+  font-weight: 520;
   line-height: 1.5;
   outline: none;
 }
 
 .composer textarea::placeholder {
-  color: #8a95a3;
+  color: var(--text-dim);
   opacity: 1;
 }
 
@@ -987,27 +1214,27 @@ button {
   align-items: center;
   gap: 7px;
   min-width: 0;
-  height: 32px;
-  border-radius: 7px;
-  color: #5b6b7d;
-  background: #f3f6f9;
-  font-size: 13px;
-  font-weight: 720;
-  white-space: nowrap;
-}
-
-.tool-button {
-  padding: 0 10px;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 10px;
+  color: var(--text-muted);
+  background: rgb(74 58 20 / 6%);
   cursor: pointer;
+  font-size: 13px;
+  font-weight: 660;
+  white-space: nowrap;
+  transition:
+    color 0.16s ease,
+    background 0.16s ease;
 }
 
 .tool-button:hover {
-  color: #111827;
-  background: #e8eef4;
+  color: var(--text);
+  background: rgb(74 58 20 / 10%);
 }
 
 .icon-only {
-  width: 32px;
+  width: 34px;
   justify-content: center;
   padding: 0;
 }
@@ -1015,22 +1242,32 @@ button {
 .send-button {
   display: inline-grid;
   flex: 0 0 auto;
-  width: 38px;
-  height: 38px;
+  width: 42px;
+  height: 42px;
   place-items: center;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   color: #ffffff;
-  background: #111827;
+  background: var(--accent-gradient);
   cursor: pointer;
+  box-shadow: 0 6px 18px rgb(139 124 255 / 32%);
+  transition:
+    transform 0.14s ease,
+    box-shadow 0.16s ease,
+    filter 0.16s ease;
 }
 
 .send-button:hover {
-  background: #263244;
+  filter: brightness(1.05);
+  box-shadow: 0 8px 24px rgb(139 124 255 / 44%);
+  transform: translateY(-1px);
 }
 
 .send-button:disabled {
   cursor: not-allowed;
-  opacity: 0.42;
+  filter: grayscale(0.3);
+  opacity: 0.4;
+  box-shadow: none;
+  transform: none;
 }
 
 .sr-only {
@@ -1042,9 +1279,134 @@ button {
   white-space: nowrap;
 }
 
+/* --------------------------------------------------------------------------
+   确认 / 审批弹窗（Web 端当前用于删除确认，样式与桌面端保持一致）
+   -------------------------------------------------------------------------- */
+.approval-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(58 44 16 / 38%);
+  backdrop-filter: blur(6px);
+}
+
+.approval-dialog {
+  display: grid;
+  gap: 16px;
+  width: min(520px, calc(100vw - 48px));
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  padding: 20px;
+  border: 1px solid var(--border-strong);
+  border-radius: 18px;
+  background: var(--bg-elevated);
+  box-shadow:
+    var(--shadow-float),
+    0 0 0 1px rgb(109 91 214 / 10%);
+}
+
+.approval-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+}
+
+.approval-header div {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.approval-header > div > span {
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 760;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.approval-header h2 {
+  overflow: hidden;
+  margin: 0;
+  color: var(--text);
+  font-size: 18px;
+  font-weight: 780;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.approval-header svg {
+  flex: 0 0 auto;
+  color: var(--danger);
+}
+
+.approval-message {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.approval-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  min-width: 0;
+  padding-top: 2px;
+}
+
+.approval-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 92px;
+  height: 38px;
+  padding: 0 16px;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 740;
+  transition:
+    filter 0.16s ease,
+    background 0.16s ease,
+    transform 0.14s ease;
+}
+
+.approval-button:active {
+  transform: translateY(1px);
+}
+
+.approval-button.secondary {
+  color: var(--text);
+  background: rgb(74 58 20 / 8%);
+}
+
+.approval-button.secondary:hover {
+  background: rgb(74 58 20 / 12%);
+}
+
+.approval-button.danger {
+  color: #ffffff;
+  background: linear-gradient(135deg, #e0603a 0%, #c8442a 100%);
+  box-shadow: 0 6px 16px rgb(200 68 42 / 30%);
+}
+
+.approval-button.danger:hover {
+  filter: brightness(1.05);
+}
+
+/* --------------------------------------------------------------------------
+   响应式
+   -------------------------------------------------------------------------- */
 @media (max-width: 1180px) {
   .app-layout {
-    grid-template-columns: 64px 292px minmax(0, 1fr);
+    grid-template-columns: 62px minmax(240px, 292px) minmax(0, 1fr);
     grid-template-areas:
       "title title title"
       "rail sessions chat";
@@ -1062,7 +1424,7 @@ button {
 @media (max-width: 840px) {
   .app-layout {
     grid-template-columns: 1fr;
-    grid-template-rows: 38px minmax(0, 1fr);
+    grid-template-rows: 40px minmax(0, 1fr);
     grid-template-areas:
       "title"
       "chat";
@@ -1093,6 +1455,7 @@ button {
   .topbar {
     align-items: stretch;
     flex-direction: column;
+    justify-content: center;
     gap: 12px;
     padding: 14px;
   }
@@ -1135,25 +1498,58 @@ button {
   }
 }
 
-/* 账号行（侧边栏底部） */
+/* --------------------------------------------------------------------------
+   账号行（侧边栏底部）
+   -------------------------------------------------------------------------- */
 .sidebar-account {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
   min-width: 0;
-  padding: 6px 10px;
-  border: 1px solid #d4dce6;
-  border-radius: 8px;
-  background: #ffffff;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--bg-elevated);
+}
+
+/* 用户头像：圆形，图片或首字母底色块。 */
+.account-avatar {
+  display: inline-grid;
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  overflow: hidden;
+  place-items: center;
+  border-radius: var(--radius-pill);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+
+.account-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.account-avatar-fallback {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  color: #ffffff;
+  background: var(--accent-gradient);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1;
 }
 
 .account-name {
   overflow: hidden;
+  flex: 1 1 auto;
   min-width: 0;
-  color: #344054;
+  color: var(--text);
   font-size: 13px;
-  font-weight: 720;
+  font-weight: 680;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1161,61 +1557,90 @@ button {
 .account-logout {
   display: inline-grid;
   flex: 0 0 auto;
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   place-items: center;
-  border-radius: 7px;
-  color: #667085;
-  background: #f3f6f9;
+  border-radius: 9px;
+  color: var(--text-dim);
+  background: rgb(74 58 20 / 6%);
   cursor: pointer;
+  transition:
+    color 0.16s ease,
+    background 0.16s ease;
 }
 
 .account-logout:hover {
-  color: #b42318;
-  background: #fdeceb;
+  color: var(--danger);
+  background: rgb(200 68 42 / 12%);
 }
 
-/* 登录页 */
+/* --------------------------------------------------------------------------
+   登录页
+   -------------------------------------------------------------------------- */
 .login-screen {
+  position: relative;
   display: grid;
   place-items: center;
   width: 100vw;
   height: 100vh;
-  background: #f4f6f8;
+  background:
+    radial-gradient(
+      900px 520px at 50% -10%,
+      rgb(139 124 255 / 16%),
+      transparent 60%
+    ),
+    radial-gradient(
+      700px 480px at 50% 110%,
+      rgb(111 176 255 / 12%),
+      transparent 62%
+    ),
+    var(--bg-base);
+}
+
+.login-qr-placeholder {
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 560;
 }
 
 .login-card {
   display: grid;
   justify-items: center;
-  gap: 14px;
-  width: min(360px, calc(100% - 48px));
-  padding: 32px 28px;
-  border: 1px solid #dce3eb;
-  border-radius: 14px;
-  background: #ffffff;
-  box-shadow: 0 12px 32px rgb(17 24 39 / 10%);
+  gap: 16px;
+  width: min(380px, calc(100% - 48px));
+  padding: 38px 32px;
+  border: 1px solid var(--border-strong);
+  border-radius: 22px;
+  background: var(--bg-elevated);
+  box-shadow:
+    var(--shadow-float),
+    0 0 0 1px rgb(109 91 214 / 10%);
   text-align: center;
 }
 
 .login-brand {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
+}
+
+.login-brand .muse-wordmark-copy strong {
+  font-size: 19px;
 }
 
 .login-title {
-  margin: 4px 0 0;
-  color: #101828;
-  font-size: 20px;
-  font-weight: 820;
+  margin: 6px 0 0;
+  color: var(--text);
+  font-size: 21px;
+  font-weight: 780;
 }
 
 .login-subtitle {
   margin: 0;
-  max-width: 280px;
-  color: #667085;
+  max-width: 290px;
+  color: var(--text-muted);
   font-size: 13px;
-  font-weight: 560;
+  font-weight: 520;
   line-height: 1.6;
 }
 
@@ -1231,23 +1656,23 @@ button {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  color: #14532d;
+  color: var(--accent);
   font-size: 13px;
-  font-weight: 620;
+  font-weight: 600;
 }
 
 .login-status-hint {
-  color: #667085;
+  color: var(--text-muted);
   font-size: 13px;
-  font-weight: 560;
+  font-weight: 520;
   line-height: 1.5;
   text-align: center;
 }
 
 .login-status-error {
-  color: #b42318;
+  color: var(--danger);
   font-size: 13px;
-  font-weight: 620;
+  font-weight: 600;
   line-height: 1.5;
   text-align: center;
 }
@@ -1271,42 +1696,58 @@ button {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  height: 40px;
+  width: 100%;
+  height: 44px;
   padding: 0 18px;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   color: #ffffff;
-  background: #14532d;
+  background: var(--accent-gradient);
   cursor: pointer;
   font-size: 14px;
-  font-weight: 760;
+  font-weight: 720;
+  letter-spacing: 0.2px;
+  box-shadow: 0 8px 22px rgb(139 124 255 / 32%);
+  transition:
+    filter 0.16s ease,
+    transform 0.14s ease,
+    box-shadow 0.16s ease;
 }
 
 .login-button:hover {
-  background: #166534;
+  filter: brightness(1.04);
+  box-shadow: 0 10px 28px rgb(139 124 255 / 44%);
+  transform: translateY(-1px);
 }
 
 .login-button:disabled {
   cursor: not-allowed;
+  filter: grayscale(0.3);
   opacity: 0.5;
+  box-shadow: none;
+  transform: none;
 }
 
 .login-button.ghost {
-  color: #14532d;
-  background: #edf9f1;
+  color: var(--accent);
+  background: var(--accent-tint);
+  box-shadow: none;
 }
 
 .login-button.ghost:hover {
-  background: #dcf2e5;
+  filter: none;
+  background: var(--accent-tint-strong);
 }
 
-/* 打字机光标：流式接收时紧随文本末尾闪烁。 */
+/* 打字机光标：流式接收时紧随文本末尾发光闪烁。 */
 .typing-caret {
   display: inline-block;
   width: 2px;
   height: 1.05em;
-  margin-left: 2px;
+  margin-left: 3px;
   vertical-align: text-bottom;
-  background: #2f855a;
+  border-radius: 2px;
+  background: var(--accent);
+  box-shadow: 0 0 6px rgb(109 91 214 / 55%);
   animation: typing-caret-blink 1s step-end infinite;
 }
 
@@ -1320,115 +1761,7 @@ button {
   }
 }
 
-.approval-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 50;
-  display: grid;
-  place-items: center;
-  padding: 24px;
-  background: rgb(15 23 42 / 42%);
-}
-
-.approval-dialog {
-  display: grid;
-  gap: 16px;
-  width: min(520px, calc(100vw - 48px));
-  max-height: calc(100vh - 48px);
-  overflow: auto;
-  padding: 18px;
-  border: 1px solid #d8e0ea;
-  border-radius: 8px;
-  background: #ffffff;
-  box-shadow: 0 24px 70px rgb(15 23 42 / 28%);
-}
-
-.approval-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  min-width: 0;
-}
-
-.approval-header div {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-}
-
-.approval-header span {
-  width: fit-content;
-  padding: 3px 7px;
-  border-radius: 999px;
-  color: #92400e;
-  background: #fef3c7;
-  font-size: 11px;
-  font-weight: 820;
-}
-
-.approval-header h2 {
-  overflow: hidden;
-  margin: 0;
-  color: #111827;
-  font-size: 18px;
-  font-weight: 830;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.approval-header svg {
-  flex: 0 0 auto;
-  color: #b42318;
-}
-
-.approval-message {
-  margin: 0;
-  color: #475467;
-  font-size: 13px;
-  line-height: 1.6;
-}
-
-.approval-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  min-width: 0;
-}
-
-.approval-button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 92px;
-  height: 36px;
-  padding: 0 14px;
-  border: none;
-  border-radius: 7px;
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 780;
-}
-
-.approval-button.secondary {
-  color: #344054;
-  background: #eef2f6;
-}
-
-.approval-button.secondary:hover {
-  background: #e2e8f0;
-}
-
-.approval-button.danger {
-  color: #ffffff;
-  background: #b42318;
-}
-
-.approval-button.danger:hover {
-  background: #912018;
-}
-
-/* 会话卡片容器：为删除按钮提供定位上下文，hover / active 时显现删除按钮。 */
+/* 会话卡片容器：为重命名/删除按钮提供定位上下文，hover / active 时显现。 */
 .session-card-wrap {
   position: relative;
   width: 100%;
@@ -1441,15 +1774,15 @@ button {
 .session-rename,
 .session-delete {
   position: absolute;
-  top: 8px;
+  top: 10px;
   display: grid;
   place-items: center;
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   padding: 0;
   border: none;
-  border-radius: 6px;
-  color: #8a95a3;
+  border-radius: 8px;
+  color: var(--text-dim);
   background: transparent;
   cursor: pointer;
   opacity: 0;
@@ -1460,7 +1793,7 @@ button {
 }
 
 .session-rename {
-  right: 34px;
+  right: 36px;
 }
 
 .session-delete {
@@ -1468,31 +1801,32 @@ button {
 }
 
 .session-rename-card {
-  grid-template-columns: 28px minmax(0, 1fr) auto;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
   cursor: default;
 }
 
 .session-rename-card:hover {
-  background: #ffffff;
+  background: var(--accent-tint);
+  transform: none;
 }
 
 .session-rename-card input {
   width: 100%;
   min-width: 0;
-  height: 28px;
-  padding: 0 8px;
-  border: 1px solid #cfd8e3;
-  border-radius: 7px;
-  color: #111827;
-  background: #ffffff;
+  height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  color: var(--text);
+  background: var(--bg-elevated);
   font-size: 13px;
-  font-weight: 760;
+  font-weight: 700;
   outline: none;
 }
 
 .session-rename-card input:focus {
-  border-color: #7aa89a;
-  box-shadow: 0 0 0 3px rgb(20 83 45 / 10%);
+  border-color: var(--accent-line);
+  box-shadow: var(--focus-ring);
 }
 
 .session-rename-actions {
@@ -1503,23 +1837,26 @@ button {
 
 .session-rename-actions button {
   display: grid;
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   place-items: center;
-  border-radius: 6px;
-  color: #667085;
+  border-radius: 8px;
+  color: var(--text-dim);
   background: transparent;
   cursor: pointer;
+  transition:
+    color 0.12s ease,
+    background 0.12s ease;
 }
 
 .session-rename-actions button:hover {
-  color: #111827;
-  background: #e8eef4;
+  color: var(--text);
+  background: var(--bg-hover);
 }
 
 .session-rename-actions button:disabled {
   cursor: default;
-  opacity: 0.7;
+  opacity: 0.6;
 }
 
 .session-card-wrap:hover .session-rename,
@@ -1532,13 +1869,13 @@ button {
 }
 
 .session-rename:hover {
-  color: #14532d;
-  background: #dcf2e5;
+  color: var(--accent);
+  background: var(--accent-tint-strong);
 }
 
 .session-delete:hover {
-  color: #b42318;
-  background: #fdecec;
+  color: var(--danger);
+  background: rgb(200 68 42 / 12%);
 }
 
 .session-rename:disabled,

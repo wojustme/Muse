@@ -1,6 +1,7 @@
 import { ExternalLink, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AuthUser } from "@muse/shared";
+import { MuseWordmark } from "../BrandMark";
 import {
   type ChallengeResult,
   devLogin,
@@ -23,7 +24,10 @@ function openBlankAuthWindow(): Window {
   return authWindow;
 }
 
-async function openExternalUrl(url: string, authWindow?: Window): Promise<void> {
+async function openExternalUrl(
+  url: string,
+  authWindow?: Window,
+): Promise<void> {
   if (authWindow && !authWindow.closed) {
     authWindow.location.href = url;
     return;
@@ -193,11 +197,7 @@ export function LoginScreen({
     <main className="login-screen">
       <div className="login-card">
         <div className="login-brand">
-          <div className="brand-logo">M</div>
-          <div className="brand-copy">
-            <strong>Muse</strong>
-            <span>AI Chat</span>
-          </div>
+          <MuseWordmark size={40} />
         </div>
 
         <h1 className="login-title">飞书登录</h1>
@@ -240,11 +240,7 @@ export function LoginScreen({
             </button>
           </>
         ) : phase === "error" ? (
-          <button
-            className="login-button"
-            onClick={beginLogin}
-            type="button"
-          >
+          <button className="login-button" onClick={beginLogin} type="button">
             <ExternalLink aria-hidden="true" size={16} strokeWidth={2.2} />
             飞书登录
           </button>
