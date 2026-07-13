@@ -1064,6 +1064,48 @@ button {
   padding: 0 0 clamp(16px, 3vh, 28px);
 }
 
+/* 工作区选择条：位于输入框上方，支持切换预设 / 浏览目录 / 空工作区。 */
+.workspace-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  margin-bottom: 10px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--glass-surface);
+  backdrop-filter: blur(12px);
+}
+
+.workspace-bar-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 660;
+  white-space: nowrap;
+}
+
+.workspace-select {
+  flex: 0 0 auto;
+  height: 34px;
+  min-width: 150px;
+}
+
+.workspace-bar-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-dim);
+  font-size: 12px;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .composer {
   display: grid;
   grid-template-rows: minmax(58px, 1fr) auto;
@@ -1588,6 +1630,16 @@ button {
     width: auto;
     max-width: none;
     min-width: 0;
+  }
+
+  .workspace-bar {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .workspace-bar-path {
+    flex-basis: 100%;
+    text-align: left;
   }
 }
 

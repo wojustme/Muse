@@ -19,6 +19,7 @@
     "@muse/api-client": "workspace:*",
     "@muse/shared": "workspace:*",
     "@tauri-apps/api": "^2.0.0",
+    "@tauri-apps/plugin-dialog": "^2.0.0",
     "@tauri-apps/plugin-opener": "^2.0.0",
     "lucide-react": "^1.23.0",
     "react": "^19.0.0",

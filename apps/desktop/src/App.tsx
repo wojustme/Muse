@@ -6,6 +6,7 @@ import {
   Clock3,
   Cpu,
   Edit3,
+  FolderOpen,
   Globe2,
   History,
   Library,
@@ -37,6 +38,8 @@ import {
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { AuthUser } from "@muse/shared";
+import { invoke } from "@tauri-apps/api/core";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { authHeaders, fetchMe, logout } from "./auth/client";
 import { MuseMark, MuseWordmark } from "./BrandMark";
 import { LoginScreen } from "./auth/LoginScreen";
@@ -100,12 +103,173 @@ type ServerMessage = {
   createdAt?: string;
 };
 
-const serverUrl = import.meta.env.VITE_SERVER_URL ?? "http://127.0.0.1:8787";
-const defaultWorkspace: WorkspaceBinding = {
-  workspaceId: "downloads",
-  displayName: "Downloads",
-  rootPath: "/Users/bytedance/Downloads",
+type SystemInfo = {
+  os: string;
+  osVersion: string;
+  cpuArchitecture: string;
+  cpuBrand: string;
 };
+
+const serverUrl = import.meta.env.VITE_SERVER_URL ?? "http://127.0.0.1:8787";
+
+// 工作区在 localStorage 中的持久化键；存 null 表示「空工作区」。
+const WORKSPACE_STORAGE_KEY = "muse.localTools.workspace";
+
+// 空工作区在 <select> 中的取值：不挂载任何目录，本地文件工具不可用，但聊天照常。
+const EMPTY_WORKSPACE_VALUE = "__empty__";
+
+// 预设工作区（基于 HOME 目录拼装）。displayName 用于展示与传给模型，rootPath 为沙箱根。
+type WorkspacePreset = {
+  workspaceId: string;
+  displayName: string;
+  // 相对 HOME 的子目录，空串表示 HOME 本身。
+  relative: string;
+};
+
+const workspacePresets: WorkspacePreset[] = [
+  { workspaceId: "home", displayName: "Home", relative: "" },
+  { workspaceId: "downloads", displayName: "Downloads", relative: "Downloads" },
+  { workspaceId: "desktop", displayName: "Desktop", relative: "Desktop" },
+  { workspaceId: "documents", displayName: "Documents", relative: "Documents" },
+];
+
+function joinHome(home: string, relative: string): string {
+  const base = home.replace(/\/+$/, "");
+  return relative ? `${base}/${relative}` : base;
+}
+
+// 解析预设为具体的 WorkspaceBinding；无 HOME 时返回 null（预设不可用）。
+function presetToWorkspace(
+  preset: WorkspacePreset,
+  home: string | null,
+): WorkspaceBinding | null {
+  if (!home) {
+    return null;
+  }
+  return {
+    workspaceId: preset.workspaceId,
+    displayName: preset.displayName,
+    rootPath: joinHome(home, preset.relative),
+  };
+}
+
+// 取路径最后一段作为自定义工作区展示名。
+function basename(path: string): string {
+  const trimmed = path.replace(/\/+$/, "");
+  const segment = trimmed.split("/").pop();
+  return segment && segment.length ? segment : trimmed || path;
+}
+
+function loadStoredWorkspace(): WorkspaceBinding | null | undefined {
+  try {
+    const raw = localStorage.getItem(WORKSPACE_STORAGE_KEY);
+    if (raw === null) {
+      return undefined; // 从未选择过 -> 由调用方决定默认值
+    }
+    if (raw === EMPTY_WORKSPACE_VALUE) {
+      return null; // 明确选择了空工作区
+    }
+    const parsed = JSON.parse(raw) as Partial<WorkspaceBinding>;
+    if (
+      parsed &&
+      typeof parsed.workspaceId === "string" &&
+      typeof parsed.displayName === "string" &&
+      typeof parsed.rootPath === "string"
+    ) {
+      return {
+        workspaceId: parsed.workspaceId,
+        displayName: parsed.displayName,
+        rootPath: parsed.rootPath,
+      };
+    }
+  } catch {
+    // 忽略损坏的存储值，回退到默认。
+  }
+  return undefined;
+}
+
+function storeWorkspace(workspace: WorkspaceBinding | null): void {
+  try {
+    localStorage.setItem(
+      WORKSPACE_STORAGE_KEY,
+      workspace ? JSON.stringify(workspace) : EMPTY_WORKSPACE_VALUE,
+    );
+  } catch {
+    // 存储失败不影响运行期使用。
+  }
+}
+
+async function loadHomeDir(): Promise<string | null> {
+  try {
+    return (await invoke<string | null>("get_home_dir")) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function detectClientOs(): string {
+  const platform = navigator.platform.toLowerCase();
+  const userAgent = navigator.userAgent.toLowerCase();
+
+  if (platform.includes("mac") || userAgent.includes("mac os x")) {
+    return "macOS";
+  }
+  if (platform.includes("win") || userAgent.includes("windows")) {
+    return "Windows";
+  }
+  if (platform.includes("linux") || userAgent.includes("linux")) {
+    return "Linux";
+  }
+  if (/iphone|ipad|ipod/.test(userAgent)) {
+    return "iOS";
+  }
+  if (userAgent.includes("android")) {
+    return "Android";
+  }
+
+  return "unknown";
+}
+
+async function loadSystemInfo(): Promise<SystemInfo | null> {
+  try {
+    return await invoke<SystemInfo>("get_system_info");
+  } catch {
+    return null;
+  }
+}
+
+function buildClientContext(
+  snapshot: LocalToolBridgeSnapshot | null,
+  systemInfo: SystemInfo | null,
+) {
+  return {
+    app: "Muse Desktop",
+    runtime: "tauri-webview",
+    os: systemInfo?.os || detectClientOs(),
+    osVersion: systemInfo?.osVersion || undefined,
+    platform: navigator.platform || "unknown",
+    cpuArchitecture: systemInfo?.cpuArchitecture || undefined,
+    cpuBrand: systemInfo?.cpuBrand || undefined,
+    hardwareConcurrency: navigator.hardwareConcurrency,
+    userAgent: navigator.userAgent,
+    language: navigator.language,
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    viewport: {
+      width: window.innerWidth,
+      height: window.innerHeight,
+    },
+    localToolsHost: snapshot
+      ? {
+          status: snapshot.status,
+          deviceId: snapshot.deviceId,
+          // 空工作区时不带 workspace 相关字段，模型据此得知未挂载目录。
+          workspaceId: snapshot.workspace?.workspaceId,
+          workspaceName: snapshot.workspace?.displayName,
+          workspaceRoot: snapshot.workspace?.rootPath,
+        }
+      : undefined,
+  };
+}
 
 function modelKey(model: ModelSelection): string {
   return `${model.provider}:${model.name}`;
@@ -534,9 +698,16 @@ function ChatApp({
   );
   const [localToolSnapshot, setLocalToolSnapshot] =
     useState<LocalToolBridgeSnapshot | null>(null);
+  const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null);
   const [approvalPrompt, setApprovalPrompt] = useState<ApprovalPrompt | null>(
     null,
   );
+  // 当前工作区：从 localStorage 恢复，null 表示空工作区。首次运行无存储值时用 undefined 占位，
+  // 待 HOME 目录加载后回落到默认预设（Downloads）。
+  const [currentWorkspace, setCurrentWorkspace] = useState<
+    WorkspaceBinding | null | undefined
+  >(() => loadStoredWorkspace());
+  const [homeDir, setHomeDir] = useState<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const conversationRef = useRef<HTMLDivElement | null>(null);
   const localToolBridgeRef = useRef<LocalToolBridge | null>(null);
@@ -544,7 +715,8 @@ function ChatApp({
   useEffect(() => {
     const bridge = new LocalToolBridge({
       serverUrl,
-      workspace: defaultWorkspace,
+      // undefined（首次运行、尚未加载 HOME）时先按空工作区连接，加载完成后再由下方 effect 挂载默认预设。
+      workspace: currentWorkspace ?? null,
       onStatus: setLocalToolSnapshot,
       onApproval: (request) =>
         new Promise<boolean>((resolve) => {
@@ -567,6 +739,52 @@ function ChatApp({
       if (localToolBridgeRef.current === bridge) {
         localToolBridgeRef.current = null;
       }
+    };
+    // 仅在挂载时创建一次 bridge；工作区变化通过 setWorkspace 增量同步（见下方 effect）。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 加载 HOME 目录用于构造预设工作区与「浏览」默认路径。
+  // 工作区默认空（不挂载任何目录）；首次运行不回落到任何预设。
+  useEffect(() => {
+    let cancelled = false;
+
+    void loadHomeDir().then((home) => {
+      if (cancelled) {
+        return;
+      }
+      setHomeDir(home);
+      setCurrentWorkspace((current) =>
+        // 已有明确选择（预设/自定义/空）时保持；首次运行（undefined）默认空工作区。
+        current !== undefined ? current : null,
+      );
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // 工作区变化时增量同步到 bridge 并持久化（undefined 占位阶段不处理）。
+  useEffect(() => {
+    if (currentWorkspace === undefined) {
+      return;
+    }
+    localToolBridgeRef.current?.setWorkspace(currentWorkspace);
+    storeWorkspace(currentWorkspace);
+  }, [currentWorkspace]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void loadSystemInfo().then((info) => {
+      if (!cancelled) {
+        setSystemInfo(info);
+      }
+    });
+
+    return () => {
+      cancelled = true;
     };
   }, []);
 
@@ -1024,12 +1242,15 @@ function ChatApp({
         body: JSON.stringify({
           sessionId: targetSessionId,
           model: selectedModel,
-          localTools: localToolSnapshot
-            ? {
-                deviceId: localToolSnapshot.deviceId,
-                workspaceId: localToolSnapshot.workspace.workspaceId,
-              }
-            : undefined,
+          client: buildClientContext(localToolSnapshot, systemInfo),
+          // 仅在挂载了工作区时启用本地工具；空工作区不传 localTools。
+          localTools:
+            localToolSnapshot && localToolSnapshot.workspace
+              ? {
+                  deviceId: localToolSnapshot.deviceId,
+                  workspaceId: localToolSnapshot.workspace.workspaceId,
+                }
+              : undefined,
           message: {
             id: userMessage.id,
             role: "user",
@@ -1192,6 +1413,58 @@ function ChatApp({
       current?.resolve(approved);
       return null;
     });
+  }
+
+  // 工作区 <select> 当前取值：空工作区 -> EMPTY，预设 -> workspaceId，自定义 -> "custom"。
+  const activeWorkspace = currentWorkspace ?? null;
+  const workspaceSelectValue =
+    activeWorkspace === null
+      ? EMPTY_WORKSPACE_VALUE
+      : workspacePresets.some(
+            (preset) => preset.workspaceId === activeWorkspace.workspaceId,
+          )
+        ? activeWorkspace.workspaceId
+        : "custom";
+
+  function handleWorkspaceSelect(value: string) {
+    if (value === EMPTY_WORKSPACE_VALUE) {
+      setCurrentWorkspace(null);
+      return;
+    }
+    if (value === "custom") {
+      // 已是自定义目录时保持不变；否则忽略（自定义需通过「浏览」选取）。
+      return;
+    }
+    const preset = workspacePresets.find(
+      (item) => item.workspaceId === value,
+    );
+    const resolved = preset ? presetToWorkspace(preset, homeDir) : null;
+    if (resolved) {
+      setCurrentWorkspace(resolved);
+    }
+  }
+
+  async function handleWorkspaceBrowse() {
+    try {
+      const selected = await openDialog({
+        directory: true,
+        multiple: false,
+        title: "选择工作区目录",
+        defaultPath: homeDir ?? undefined,
+      });
+      if (typeof selected !== "string" || !selected) {
+        return;
+      }
+      setCurrentWorkspace({
+        workspaceId: `custom:${selected}`,
+        displayName: basename(selected),
+        rootPath: selected,
+      });
+    } catch (error) {
+      setNotice(
+        error instanceof Error ? error.message : "选择工作区目录失败",
+      );
+    }
   }
 
   const approvalCommand = approvalDetail(approvalPrompt, "Command");
@@ -1505,6 +1778,45 @@ function ChatApp({
           </div>
 
           <div className="bottom-dock">
+            <div className="workspace-bar">
+              <span className="workspace-bar-label">
+                <FolderOpen aria-hidden="true" size={15} strokeWidth={2.2} />
+                工作区
+              </span>
+              <label className="model-select workspace-select">
+                <select
+                  aria-label="Workspace"
+                  onChange={(event) =>
+                    handleWorkspaceSelect(event.target.value)
+                  }
+                  value={workspaceSelectValue}
+                >
+                  <option value={EMPTY_WORKSPACE_VALUE}>空工作区</option>
+                  {workspacePresets.map((preset) => (
+                    <option key={preset.workspaceId} value={preset.workspaceId}>
+                      {preset.displayName}
+                    </option>
+                  ))}
+                  {workspaceSelectValue === "custom" && activeWorkspace ? (
+                    <option value="custom">
+                      {activeWorkspace.displayName}（自定义）
+                    </option>
+                  ) : null}
+                </select>
+                <ChevronDown aria-hidden="true" size={16} strokeWidth={2.2} />
+              </label>
+              <button
+                className="tool-button"
+                onClick={() => void handleWorkspaceBrowse()}
+                type="button"
+              >
+                <FolderOpen aria-hidden="true" size={16} strokeWidth={2.1} />
+                <span>浏览…</span>
+              </button>
+              <span className="workspace-bar-path" title={activeWorkspace?.rootPath}>
+                {activeWorkspace ? activeWorkspace.rootPath : "未挂载本地目录"}
+              </span>
+            </div>
             <form className="composer" onSubmit={handleSubmit}>
               <textarea
                 aria-label="Message"
@@ -1649,7 +1961,9 @@ function ChatApp({
             <div>
               <span className="runtime-dot ready" />
               <span>Workspace</span>
-              <strong>{localToolSnapshot?.workspace.displayName ?? "-"}</strong>
+              <strong>
+                {localToolSnapshot?.workspace?.displayName ?? "空工作区"}
+              </strong>
             </div>
             <div>
               <span

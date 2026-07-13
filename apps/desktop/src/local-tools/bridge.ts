@@ -18,7 +18,8 @@ export type WorkspaceBinding = {
 export type LocalToolBridgeSnapshot = {
   status: LocalToolBridgeStatus;
   deviceId: string;
-  workspace: WorkspaceBinding;
+  // null 表示「空工作区」：不挂载任何目录，本地文件工具不可用，但聊天照常。
+  workspace: WorkspaceBinding | null;
   error?: string;
 };
 
@@ -92,7 +93,8 @@ type CommandRunResult = {
 
 type LocalToolBridgeOptions = {
   serverUrl: string;
-  workspace: WorkspaceBinding;
+  // 初始工作区，null 表示空工作区（不挂载目录）。运行期可通过 setWorkspace 修改。
+  workspace: WorkspaceBinding | null;
   onStatus?: (snapshot: LocalToolBridgeSnapshot) => void;
   onApproval?: (request: LocalToolApprovalRequest) => Promise<boolean>;
 };
@@ -299,8 +301,12 @@ export class LocalToolBridge {
   private socket: WebSocket | null = null;
   private status: LocalToolBridgeStatus = "disabled";
   private error: string | undefined;
+  // 当前工作区，null 表示空工作区。可在运行期通过 setWorkspace 动态切换。
+  private currentWorkspace: WorkspaceBinding | null;
 
-  constructor(private readonly options: LocalToolBridgeOptions) {}
+  constructor(private readonly options: LocalToolBridgeOptions) {
+    this.currentWorkspace = options.workspace;
+  }
 
   connect() {
     const token = loadToken();
@@ -332,14 +338,17 @@ export class LocalToolBridge {
           manifests,
         },
       });
-      this.send({
-        type: "workspace.attach",
-        payload: {
-          deviceId: this.deviceId,
-          workspaceId: this.options.workspace.workspaceId,
-          displayName: this.options.workspace.displayName,
-        },
-      });
+      // 空工作区不挂载任何目录，仅在有工作区时发送 attach。
+      if (this.currentWorkspace) {
+        this.send({
+          type: "workspace.attach",
+          payload: {
+            deviceId: this.deviceId,
+            workspaceId: this.currentWorkspace.workspaceId,
+            displayName: this.currentWorkspace.displayName,
+          },
+        });
+      }
       this.setStatus("ready");
     });
 
@@ -372,9 +381,48 @@ export class LocalToolBridge {
     return {
       status: this.status,
       deviceId: this.deviceId,
-      workspace: this.options.workspace,
+      workspace: this.currentWorkspace,
       error: this.error,
     };
+  }
+
+  // 动态切换工作区：无需重连 socket，仅对已连接的会话发送 detach/attach。
+  // next 为 null 表示切换到空工作区（卸载当前目录）。
+  setWorkspace(next: WorkspaceBinding | null) {
+    const previous = this.currentWorkspace;
+    if (
+      previous?.workspaceId === next?.workspaceId &&
+      previous?.rootPath === next?.rootPath &&
+      previous?.displayName === next?.displayName
+    ) {
+      return;
+    }
+
+    this.currentWorkspace = next;
+
+    if (this.socket?.readyState === WebSocket.OPEN) {
+      if (previous) {
+        this.send({
+          type: "workspace.detach",
+          payload: {
+            deviceId: this.deviceId,
+            workspaceId: previous.workspaceId,
+          },
+        });
+      }
+      if (next) {
+        this.send({
+          type: "workspace.attach",
+          payload: {
+            deviceId: this.deviceId,
+            workspaceId: next.workspaceId,
+            displayName: next.displayName,
+          },
+        });
+      }
+    }
+
+    this.options.onStatus?.(this.snapshot());
   }
 
   private setStatus(status: LocalToolBridgeStatus, error?: string) {
@@ -423,6 +471,12 @@ export class LocalToolBridge {
   }
 
   private async executeTool(toolName: string, args: unknown): Promise<unknown> {
+    // 空工作区下不应收到工具请求（服务端不会注册本地工具）；防御性兜底。
+    const workspace = this.currentWorkspace;
+    if (!workspace) {
+      throw new Error("No workspace attached. Select a workspace first.");
+    }
+
     if (toolName === "workspace.read_file") {
       const path = inputPath(args);
       if (!path) {
@@ -431,7 +485,7 @@ export class LocalToolBridge {
 
       return invoke<FileReadResult>("read_workspace_file", {
         path,
-        workspaceRoot: this.options.workspace.rootPath,
+        workspaceRoot: workspace.rootPath,
       });
     }
 
@@ -444,7 +498,7 @@ export class LocalToolBridge {
       return invoke<SearchResult>("search_workspace_files", {
         query,
         path: inputPath(args) ?? ".",
-        workspaceRoot: this.options.workspace.rootPath,
+        workspaceRoot: workspace.rootPath,
       });
     }
 
@@ -456,7 +510,7 @@ export class LocalToolBridge {
 
       return invoke<DirectoryListing>("list_workspace_directory", {
         path,
-        workspaceRoot: this.options.workspace.rootPath,
+        workspaceRoot: workspace.rootPath,
       });
     }
 
@@ -479,9 +533,9 @@ export class LocalToolBridge {
         toolName,
         title: "Write local file",
         riskLevel: "write",
-        workspace: this.options.workspace,
+        workspace,
         details: [
-          { label: "Workspace", value: this.options.workspace.displayName },
+          { label: "Workspace", value: workspace.displayName },
           { label: "Path", value: path },
           { label: "Bytes", value: String(new TextEncoder().encode(content).length) },
           { label: "New content", value: preview },
@@ -494,7 +548,7 @@ export class LocalToolBridge {
       return invoke<FileWriteResult>("write_workspace_file", {
         path,
         content,
-        workspaceRoot: this.options.workspace.rootPath,
+        workspaceRoot: workspace.rootPath,
       });
     }
 
@@ -517,9 +571,9 @@ export class LocalToolBridge {
         toolName,
         title: "Apply local patch",
         riskLevel: "write",
-        workspace: this.options.workspace,
+        workspace,
         details: [
-          { label: "Workspace", value: this.options.workspace.displayName },
+          { label: "Workspace", value: workspace.displayName },
           { label: "Path", value: path },
           { label: "Patch bytes", value: String(new TextEncoder().encode(patch).length) },
           { label: "Unified diff", value: preview },
@@ -532,7 +586,7 @@ export class LocalToolBridge {
       return invoke<PatchApplyResult>("apply_workspace_patch", {
         path,
         patch,
-        workspaceRoot: this.options.workspace.rootPath,
+        workspaceRoot: workspace.rootPath,
       });
     }
 
@@ -548,9 +602,9 @@ export class LocalToolBridge {
         toolName,
         title: "Run local command",
         riskLevel: "dangerous",
-        workspace: this.options.workspace,
+        workspace,
         details: [
-          { label: "Workspace", value: this.options.workspace.displayName },
+          { label: "Workspace", value: workspace.displayName },
           { label: "Working directory", value: cwd },
           { label: "Command", value: command },
         ],
@@ -562,7 +616,7 @@ export class LocalToolBridge {
       return invoke<CommandRunResult>("run_workspace_command", {
         command,
         cwd,
-        workspaceRoot: this.options.workspace.rootPath,
+        workspaceRoot: workspace.rootPath,
         timeoutMs: inputTimeoutMs(args),
         maxOutputBytes: 32_000,
       });

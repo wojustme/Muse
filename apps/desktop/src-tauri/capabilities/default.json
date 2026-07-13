@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Default capabilities for Muse desktop.",
   "windows": ["main"],
-  "permissions": ["core:default", "opener:default"]
+  "permissions": ["core:default", "opener:default", "dialog:default"]
 }

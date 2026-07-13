@@ -81,6 +81,48 @@ struct CommandRunResult {
     stderr_truncated: bool,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SystemInfo {
+    os: String,
+    os_version: String,
+    cpu_architecture: String,
+    cpu_brand: String,
+}
+
+fn command_output(program: &str, args: &[&str]) -> Option<String> {
+    let output = Command::new(program).args(args).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if value.is_empty() {
+        None
+    } else {
+        Some(value)
+    }
+}
+
+#[tauri::command]
+fn get_system_info() -> SystemInfo {
+    SystemInfo {
+        os: std::env::consts::OS.to_string(),
+        os_version: command_output("sw_vers", &["-productVersion"]).unwrap_or_default(),
+        cpu_architecture: command_output("uname", &["-m"])
+            .unwrap_or_else(|| std::env::consts::ARCH.to_string()),
+        cpu_brand: command_output("sysctl", &["-n", "machdep.cpu.brand_string"])
+            .or_else(|| command_output("sysctl", &["-n", "hw.model"]))
+            .unwrap_or_default(),
+    }
+}
+
+/// 返回当前用户的 HOME 目录，供前端拼装预设工作区（Downloads/Desktop/Documents 等）。
+#[tauri::command]
+fn get_home_dir() -> Option<String> {
+    std::env::var("HOME").ok().filter(|value| !value.is_empty())
+}
+
 fn is_denied_path(path: &Path) -> bool {
     path.components().any(|component| {
         let value = component.as_os_str().to_string_lossy();
@@ -616,7 +658,10 @@ fn run_workspace_command(
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
+            get_system_info,
+            get_home_dir,
             list_workspace_directory,
             read_workspace_file,
             write_workspace_file,
