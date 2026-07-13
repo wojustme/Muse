@@ -50,6 +50,8 @@ const chatRequestSchema = z.object({
       workspaceId: z.string().min(1),
     })
     .optional(),
+  // 用户在客户端开启了联网检索开关时为 true。
+  webSearch: z.boolean().optional(),
   client: z
     .object({
       app: z.string().min(1).max(64).optional(),
@@ -161,6 +163,11 @@ function buildLocalToolSystemPrompt(input: {
     "When tools are available, use them directly instead of claiming that a capability is unavailable.",
     `The tools registered for this request are: ${input.availableToolNames.join(", ") || "(none)"}.`,
   ];
+  if (input.availableToolNames.includes("WebSearch")) {
+    base.push(
+      "Use WebSearch to look up current information on the public web when the user asks about recent events, current facts, prices, releases, or anything likely outside your training data. Cite the returned URLs when you rely on them.",
+    );
+  }
   const client = input.client;
   const clientLines = client
     ? [
@@ -387,6 +394,7 @@ export async function chatRoutes(app: FastifyInstance) {
       runId,
       deviceId: parsed.data.localTools?.deviceId,
       workspaceId: parsed.data.localTools?.workspaceId,
+      webSearchRequested: parsed.data.webSearch ?? false,
       localToolBroker,
       onToolEvent: (event) => {
         if (!raw || raw.writableEnded) {

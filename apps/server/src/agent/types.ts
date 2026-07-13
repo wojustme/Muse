@@ -10,6 +10,8 @@ export type ToolExecutionContext = {
   runId?: string;
   deviceId?: string;
   workspaceId?: string;
+  // 用户是否在本次请求中开启了联网检索（客户端 Search 开关）。
+  webSearchRequested?: boolean;
   localToolBroker?: LocalToolBroker;
   onToolEvent?: (event: MuseToolRuntimeEvent) => void;
 };

@@ -2,6 +2,7 @@ import cors from "@fastify/cors";
 import Fastify from "fastify";
 import { registerAuthProviders } from "./auth/registry.js";
 import { env } from "./config/env.js";
+import { loadWebSearchConfig } from "./config/web-search-config.js";
 import { installLocalToolSocket } from "./local-tools/local-tool-socket.js";
 import { authRoutes } from "./routes/auth.js";
 import { chatRoutes } from "./routes/chat.js";
@@ -12,6 +13,8 @@ import { sessionRoutes } from "./routes/sessions.js";
 
 // 按接入顺序注册已配置的第三方登录 provider。
 await registerAuthProviders();
+// 从 system_configs 载入联网搜索（Tavily）配置。
+await loadWebSearchConfig();
 
 const app = Fastify({
   logger: true,

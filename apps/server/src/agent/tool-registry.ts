@@ -1,9 +1,11 @@
 import { env } from "../config/env.js";
+import { isWebSearchEnabled } from "../config/web-search-config.js";
 import { createLocalBashTools } from "./tools/local-bash.js";
 import { createMacLocalTools } from "./tools/mac-local.js";
 import { createModelTools } from "./tools/model.js";
 import { createSessionTools } from "./tools/session.js";
 import { timeTools } from "./tools/time.js";
+import { createWebSearchTools } from "./tools/web-search.js";
 import type {
   MuseToolMetadata,
   RegisteredMuseTools,
@@ -42,6 +44,13 @@ const builtinToolMetadataList: MuseToolMetadata[] = [
   {
     name: "muse_models_available",
     title: "Available models",
+    source: "builtin",
+    riskLevel: "read",
+    requiresApproval: false,
+  },
+  {
+    name: "WebSearch",
+    title: "Web search",
     source: "builtin",
     riskLevel: "read",
     requiresApproval: false,
@@ -108,6 +117,10 @@ export function createBuiltinToolRegistry(
     ...timeTools,
     ...createSessionTools(context),
     ...createModelTools(context),
+    // 联网检索需同时满足：服务端已配置并启用（DB），且本次请求用户开启了 Search 开关。
+    ...(isWebSearchEnabled() && context.webSearchRequested
+      ? createWebSearchTools(context)
+      : {}),
     ...(env.MUSE_LOCAL_BASH_ENABLED ? createLocalBashTools(context) : {}),
     ...(context.localToolBroker && context.deviceId && context.workspaceId
       ? createMacLocalTools(context)

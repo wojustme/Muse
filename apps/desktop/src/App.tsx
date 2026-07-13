@@ -807,6 +807,8 @@ function ChatApp({
     null,
   );
   const [searchText, setSearchText] = useState("");
+  // 联网检索开关：用户在 composer 点击 WebSearch 时切换，仅对本客户端生效。
+  const [webSearchEnabled, setWebSearchEnabled] = useState(false);
   const [notice, setNotice] = useState<string>("");
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(
     null,
@@ -1393,6 +1395,8 @@ function ChatApp({
                   workspaceId: localToolWorkspace.workspaceId,
                 }
               : undefined,
+          // 用户开启 WebSearch 开关时请求联网检索。
+          webSearch: webSearchEnabled,
           message: {
             id: userMessage.id,
             role: "user",
@@ -2037,9 +2041,17 @@ function ChatApp({
                     <span className="sr-only">Attach</span>
                   </button>
 
-                  <button className="tool-button" type="button">
+                  <button
+                    className={`tool-button ${webSearchEnabled ? "active" : ""}`}
+                    aria-pressed={webSearchEnabled}
+                    onClick={() => setWebSearchEnabled((value) => !value)}
+                    title={
+                      webSearchEnabled ? "联网检索已开启" : "开启联网检索"
+                    }
+                    type="button"
+                  >
                     <Globe2 aria-hidden="true" size={20} strokeWidth={2.1} />
-                    <span>Search</span>
+                    <span>联网搜索</span>
                   </button>
                 </div>
 
