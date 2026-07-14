@@ -1075,6 +1075,8 @@ function ChatApp({
 
     setNotice("");
     setInput("");
+    // 新对话默认关闭联网搜索，需用户在本轮会话中显式开启。
+    setWebSearchEnabled(false);
 
     if (activeSession?.isDraft && activeSession.messages.length === 0) {
       window.requestAnimationFrame(() => inputRef.current?.focus());
