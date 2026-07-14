@@ -1,0 +1,1196 @@
+/* ==========================================================================
+   Muse Mobile · Warm Cream Creative Studio
+   与桌面/Web 端共享同一套暖米黄创作工作台主题，布局改为移动单列 + 抽屉。
+   ========================================================================== */
+
+:root {
+  --bg-base: #f4efdf;
+  --bg-surface: #fbf8ef;
+  --bg-elevated: #fffdf7;
+
+  --glass-surface: rgb(255 253 247 / 90%);
+  --glass-topbar: rgb(248 244 232 / 88%);
+
+  --accent: #6d5bd6;
+  --accent-blue: #3f7fc8;
+  --accent-gradient: linear-gradient(135deg, #8b7cff 0%, #6fb0ff 100%);
+  --accent-tint: rgb(109 91 214 / 12%);
+  --accent-tint-strong: rgb(109 91 214 / 18%);
+  --accent-line: rgb(109 91 214 / 30%);
+
+  --text: #3a3320;
+  --text-muted: #726a52;
+  --text-dim: #9c937a;
+
+  --border: rgb(74 58 20 / 12%);
+  --border-strong: rgb(74 58 20 / 18%);
+
+  --success: #3d9a5c;
+  --warn: #c8890f;
+  --danger: #c8442a;
+
+  --radius-card: 16px;
+  --radius-control: 12px;
+  --radius-pill: 999px;
+
+  --shadow-panel: 0 1px 2px rgb(74 58 20 / 8%);
+  --shadow-float: 0 18px 48px rgb(74 58 20 / 16%);
+  --focus-ring: 0 0 0 3px rgb(109 91 214 / 18%);
+
+  /* 安全区：刘海 / Home Indicator */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+
+  color: var(--text);
+  background: var(--bg-base);
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, system-ui,
+    sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  overflow: hidden;
+  color: var(--text);
+  background: var(--bg-base);
+  overscroll-behavior: none;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  border: 0;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+.spin {
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* --------------------------------------------------------------------------
+   App 骨架：顶栏 + 会话区（单列）
+   -------------------------------------------------------------------------- */
+.m-app {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100dvh;
+  background: var(--bg-base);
+}
+
+.m-topbar {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 40px;
+  align-items: center;
+  gap: 8px;
+  padding: calc(var(--safe-top) + 8px) calc(var(--safe-right) + 12px) 8px
+    calc(var(--safe-left) + 12px);
+  background: var(--glass-topbar);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+}
+
+.m-topbar-title {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 760;
+  color: var(--text);
+}
+
+.m-topbar-title span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.m-icon-button {
+  display: inline-grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border-radius: var(--radius-control);
+  color: var(--text-muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.m-icon-button:active {
+  background: rgb(74 58 20 / 8%);
+}
+
+.m-canvas {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-height: 0;
+}
+
+.m-conversation {
+  min-height: 0;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 16px calc(var(--safe-right) + 14px) 12px
+    calc(var(--safe-left) + 14px);
+}
+
+.m-loading {
+  display: grid;
+  place-content: center;
+  gap: 8px;
+  justify-items: center;
+  height: 100%;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* --------------------------------------------------------------------------
+   消息流（复用桌面/Web 视觉：头像 + 气泡）
+   -------------------------------------------------------------------------- */
+.message-list {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 14px;
+  min-height: 100%;
+}
+
+.message-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+
+.message-row-user {
+  flex-direction: row-reverse;
+}
+
+.message-avatar {
+  display: inline-grid;
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  overflow: hidden;
+  place-items: center;
+  border-radius: 9px;
+}
+
+.message-avatar .account-avatar.message-avatar-img {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+
+.message {
+  max-width: 82%;
+  padding: 11px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  color: var(--text);
+  background: var(--glass-surface);
+  box-shadow: var(--shadow-panel);
+}
+
+.message-user {
+  border-color: var(--accent-line);
+  background: var(--accent-tint);
+  border-top-right-radius: 4px;
+}
+
+.message-assistant {
+  border-top-left-radius: 4px;
+}
+
+.message p {
+  margin: 0;
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.62;
+  white-space: pre-wrap;
+}
+
+.message-markdown {
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.62;
+  overflow-wrap: anywhere;
+}
+
+.message-markdown > *:first-child {
+  margin-top: 0;
+}
+
+.message-markdown > *:last-child {
+  margin-bottom: 0;
+}
+
+.message-markdown p,
+.message-markdown ul,
+.message-markdown ol,
+.message-markdown blockquote,
+.message-markdown pre,
+.message-markdown table {
+  margin: 0 0 10px;
+}
+
+.message-markdown ul,
+.message-markdown ol {
+  padding-left: 20px;
+}
+
+.message-markdown li + li {
+  margin-top: 4px;
+}
+
+.message-markdown code {
+  padding: 2px 6px;
+  border-radius: 6px;
+  color: var(--accent);
+  background: var(--accent-tint);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+}
+
+.message-markdown pre {
+  overflow: auto;
+  padding: 12px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: #efe7d3;
+}
+
+.message-markdown pre code {
+  padding: 0;
+  color: var(--text);
+  background: transparent;
+  white-space: pre;
+}
+
+.message-markdown blockquote {
+  padding-left: 12px;
+  border-left: 3px solid var(--accent-line);
+  color: var(--text-muted);
+}
+
+.message-markdown table {
+  display: block;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+
+.message-markdown th,
+.message-markdown td {
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.message-markdown a {
+  color: var(--accent-blue);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.typing-caret {
+  display: inline-block;
+  width: 7px;
+  height: 1.05em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: var(--accent);
+  border-radius: 1px;
+  animation: caret-blink 1s steps(1) infinite;
+}
+
+@keyframes caret-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   工具调用卡片（复用桌面/Web 视觉）
+   -------------------------------------------------------------------------- */
+.tool-call-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.tool-call {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgb(74 58 20 / 4%);
+}
+
+.tool-call summary {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 8px 10px;
+  color: var(--text-muted);
+  cursor: pointer;
+  list-style: none;
+}
+
+.tool-call summary::-webkit-details-marker {
+  display: none;
+}
+
+.tool-call-name {
+  overflow: hidden;
+  min-width: 0;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 720;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-call-status {
+  display: inline-grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  border-radius: 6px;
+}
+
+.tool-call-status.running {
+  color: var(--warn);
+  background: rgb(200 137 15 / 12%);
+}
+
+.tool-call-status.running svg {
+  animation: spin 0.9s linear infinite;
+}
+
+.tool-call-status.succeeded {
+  color: var(--success);
+  background: rgb(61 154 92 / 12%);
+}
+
+.tool-call-status.failed {
+  color: var(--danger);
+  background: rgb(200 68 42 / 12%);
+}
+
+.tool-call-risk {
+  padding: 2px 6px;
+  border-radius: 999px;
+  color: var(--text-muted);
+  background: rgb(74 58 20 / 6%);
+  font-size: 11px;
+  font-weight: 720;
+}
+
+.tool-call-risk.write,
+.tool-call-risk.dangerous {
+  color: var(--danger);
+  background: rgb(200 68 42 / 10%);
+}
+
+.tool-call-body {
+  display: grid;
+  gap: 8px;
+  padding: 0 10px 10px;
+}
+
+.tool-call-body span {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 760;
+  text-transform: uppercase;
+}
+
+.tool-call-body pre {
+  max-height: 220px;
+  margin: 0;
+  overflow: auto;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  background: rgb(255 253 247 / 70%);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* --------------------------------------------------------------------------
+   空态 / 通知
+   -------------------------------------------------------------------------- */
+.empty-state {
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 12px;
+  min-height: 100%;
+  padding-bottom: 40px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.empty-icon {
+  display: grid;
+  width: 52px;
+  height: 52px;
+  place-items: center;
+  border-radius: 16px;
+  color: var(--accent);
+  background: var(--accent-tint);
+}
+
+.empty-state h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: 18px;
+  font-weight: 780;
+}
+
+.empty-state p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.app-notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid rgb(200 137 15 / 40%);
+  border-radius: 12px;
+  color: var(--text);
+  background: rgb(200 137 15 / 12%);
+  font-size: 13px;
+}
+
+.app-notice span {
+  flex: 1;
+  min-width: 0;
+}
+
+.app-notice button {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  color: var(--text-muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+/* --------------------------------------------------------------------------
+   底部输入区（composer）
+   -------------------------------------------------------------------------- */
+.m-dock {
+  padding: 8px calc(var(--safe-right) + 12px) calc(var(--safe-bottom) + 10px)
+    calc(var(--safe-left) + 12px);
+  background: var(--glass-topbar);
+  backdrop-filter: blur(12px);
+  border-top: 1px solid var(--border);
+}
+
+.m-composer {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 18px;
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-panel);
+}
+
+.m-composer textarea {
+  width: 100%;
+  max-height: 140px;
+  padding: 4px 4px 0;
+  border: 0;
+  color: var(--text);
+  background: transparent;
+  font-size: 16px; /* iOS ≥16px 避免聚焦时自动缩放 */
+  line-height: 1.5;
+  resize: none;
+  outline: none;
+}
+
+.m-composer textarea::placeholder {
+  color: var(--text-dim);
+}
+
+.m-composer-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.m-composer-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow-x: auto;
+  flex: 1;
+}
+
+.m-chip {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  color: var(--text-muted);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 640;
+  cursor: pointer;
+}
+
+.m-chip.active {
+  color: var(--accent);
+  border-color: var(--accent-line);
+  background: var(--accent-tint);
+}
+
+.m-model-select {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  height: 34px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  color: var(--text-muted);
+}
+
+.m-model-select select {
+  max-width: 130px;
+  border: 0;
+  color: var(--text);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 640;
+  outline: none;
+}
+
+.send-button {
+  display: inline-grid;
+  flex: 0 0 auto;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border-radius: var(--radius-control);
+  color: #ffffff;
+  background: var(--accent-gradient);
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgb(139 124 255 / 32%);
+}
+
+.send-button:disabled {
+  cursor: not-allowed;
+  filter: grayscale(0.3);
+  opacity: 0.4;
+  box-shadow: none;
+}
+
+/* --------------------------------------------------------------------------
+   抽屉：会话列表 / 远程设备
+   -------------------------------------------------------------------------- */
+.m-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  background: rgb(58 44 16 / 38%);
+  backdrop-filter: blur(4px);
+  animation: fade-in 0.16s ease;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.m-drawer {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(86%, 360px);
+  height: 100%;
+  padding: calc(var(--safe-top) + 14px) 16px calc(var(--safe-bottom) + 14px)
+    calc(var(--safe-left) + 16px);
+  background: var(--bg-surface);
+  border-right: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-float);
+  animation: slide-in 0.2s ease;
+  overflow: hidden;
+}
+
+@keyframes slide-in {
+  from {
+    transform: translateX(-16px);
+    opacity: 0.4;
+  }
+}
+
+.m-drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.m-drawer-head-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 760;
+}
+
+.m-drawer-account {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg-elevated);
+}
+
+.m-drawer-account .account-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-logout {
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  color: var(--text-muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.account-logout:active {
+  background: rgb(74 58 20 / 8%);
+}
+
+.m-drawer-hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.m-drawer-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 760;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.m-drawer-section-head span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.m-drawer-section-head button {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  color: var(--text-muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.m-session-list,
+.m-remote-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-right: 4px;
+}
+
+.history-state {
+  padding: 16px 4px;
+  color: var(--text-dim);
+  font-size: 13px;
+  text-align: center;
+}
+
+.m-session-card {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-elevated);
+}
+
+.m-session-card.active {
+  border-color: var(--accent-line);
+  background: var(--accent-tint);
+}
+
+.m-session-open {
+  display: grid;
+  flex: 1;
+  gap: 3px;
+  min-width: 0;
+  padding: 10px 12px;
+  text-align: left;
+  background: transparent;
+  cursor: pointer;
+}
+
+.m-session-title {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 720;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.m-session-preview {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.m-session-meta {
+  color: var(--text-dim);
+  font-size: 11.5px;
+}
+
+.session-delete {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 42px;
+  border-radius: 0 12px 12px 0;
+  color: var(--text-dim);
+  background: transparent;
+  cursor: pointer;
+}
+
+.session-delete:active {
+  color: var(--danger);
+  background: rgb(200 68 42 / 10%);
+}
+
+.m-remote-item {
+  display: grid;
+  gap: 3px;
+  padding: 11px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-elevated);
+  text-align: left;
+  cursor: pointer;
+}
+
+.m-remote-item.active {
+  border-color: var(--accent-line);
+  background: var(--accent-tint);
+}
+
+.m-remote-item.disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.m-remote-name {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 720;
+}
+
+.m-remote-name svg {
+  color: var(--accent);
+}
+
+.m-remote-sub {
+  color: var(--text-muted);
+  font-size: 12.5px;
+}
+
+/* --------------------------------------------------------------------------
+   头像
+   -------------------------------------------------------------------------- */
+.account-avatar {
+  display: inline-grid;
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  overflow: hidden;
+  place-items: center;
+  border-radius: 10px;
+  background: var(--accent-gradient);
+}
+
+.account-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.account-avatar-fallback {
+  color: #fff;
+  font-size: 15px;
+  font-weight: 780;
+}
+
+/* --------------------------------------------------------------------------
+   品牌字标
+   -------------------------------------------------------------------------- */
+.muse-wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.muse-wordmark-copy {
+  display: grid;
+  gap: 1px;
+}
+
+.muse-wordmark-copy strong {
+  color: var(--text);
+  font-size: 17px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.muse-wordmark-copy span {
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 620;
+}
+
+/* --------------------------------------------------------------------------
+   登录页
+   -------------------------------------------------------------------------- */
+.login-screen {
+  display: grid;
+  place-items: center;
+  height: 100dvh;
+  padding: calc(var(--safe-top) + 24px) 22px calc(var(--safe-bottom) + 24px);
+  background:
+    radial-gradient(
+      900px 520px at 50% -10%,
+      rgb(139 124 255 / 16%),
+      transparent 60%
+    ),
+    radial-gradient(
+      700px 480px at 50% 110%,
+      rgb(111 176 255 / 12%),
+      transparent 62%
+    ),
+    var(--bg-base);
+}
+
+.login-qr-placeholder {
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.login-card {
+  display: grid;
+  gap: 14px;
+  width: min(400px, 100%);
+  padding: 28px 24px calc(var(--safe-bottom) + 24px);
+  border: 1px solid var(--border-strong);
+  border-radius: 22px;
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-float);
+}
+
+.login-brand {
+  display: grid;
+  justify-items: center;
+  padding-bottom: 4px;
+}
+
+.login-title {
+  margin: 0;
+  color: var(--text);
+  font-size: 22px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.login-subtitle {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13.5px;
+  line-height: 1.6;
+  text-align: center;
+}
+
+.login-server {
+  display: grid;
+  gap: 6px;
+}
+
+.login-server-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 720;
+}
+
+.login-server input {
+  width: 100%;
+  height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  color: var(--text);
+  background: var(--bg-surface);
+  font-size: 16px;
+  outline: none;
+}
+
+.login-server input:focus {
+  border-color: var(--accent-line);
+  box-shadow: var(--focus-ring);
+}
+
+.login-status {
+  min-height: 22px;
+}
+
+.login-status-waiting {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 640;
+}
+
+.login-status-hint {
+  color: var(--text-muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+.login-status-error {
+  color: var(--danger);
+  font-size: 13px;
+  text-align: center;
+}
+
+.login-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  height: 48px;
+  border-radius: var(--radius-control);
+  color: #fff;
+  background: var(--accent-gradient);
+  font-size: 15px;
+  font-weight: 740;
+  cursor: pointer;
+  box-shadow: 0 8px 22px rgb(139 124 255 / 32%);
+}
+
+.login-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  box-shadow: none;
+}
+
+.login-button.ghost {
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid var(--accent-line);
+  box-shadow: none;
+}
+
+/* --------------------------------------------------------------------------
+   确认弹窗（删除会话）
+   -------------------------------------------------------------------------- */
+.approval-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(58 44 16 / 38%);
+  backdrop-filter: blur(6px);
+}
+
+.approval-dialog {
+  display: grid;
+  gap: 16px;
+  width: min(460px, calc(100vw - 40px));
+  padding: 20px;
+  border: 1px solid var(--border-strong);
+  border-radius: 18px;
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-float);
+}
+
+.approval-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+}
+
+.approval-header div {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.approval-header > div > span {
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 760;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.approval-header h2 {
+  overflow: hidden;
+  margin: 0;
+  color: var(--text);
+  font-size: 17px;
+  font-weight: 780;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.approval-header svg {
+  flex: 0 0 auto;
+  color: var(--danger);
+}
+
+.approval-message {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.approval-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.approval-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 88px;
+  height: 40px;
+  padding: 0 16px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 740;
+}
+
+.approval-button.secondary {
+  color: var(--text);
+  background: rgb(74 58 20 / 8%);
+}
+
+.approval-button.danger {
+  color: #fff;
+  background: var(--danger);
+}

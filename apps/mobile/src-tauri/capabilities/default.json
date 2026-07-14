@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/mobile-schema.json",
+  "identifier": "default",
+  "description": "Default capabilities for Muse mobile.",
+  "windows": ["main"],
+  "permissions": ["core:default", "opener:default"]
+}

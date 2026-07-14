@@ -31,6 +31,8 @@ apps/server/muse.db-*
 target/
 apps/desktop/src-tauri/target/
 apps/desktop/src-tauri/gen/
+apps/mobile/src-tauri/target/
+apps/mobile/src-tauri/gen/
 
 # Package manager lockfiles not used by this repo
 bun.lock
