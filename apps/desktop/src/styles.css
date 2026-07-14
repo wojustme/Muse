@@ -365,7 +365,7 @@ button {
 .history-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   min-height: 0;
   overflow: auto;
   padding-top: 4px;
@@ -441,33 +441,53 @@ button {
 }
 
 .session-card {
+  position: relative;
   display: grid;
   grid-template-columns: 30px minmax(0, 1fr);
-  gap: 10px;
+  gap: 11px;
   align-items: start;
   width: 100%;
   min-width: 0;
-  padding: 11px 12px;
-  border: 1px solid transparent;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
   border-radius: var(--radius-control);
   color: var(--text-muted);
-  background: transparent;
+  background: var(--bg-surface);
   cursor: pointer;
   text-align: left;
+  box-shadow: var(--shadow-panel);
   transition:
     background 0.16s ease,
     border-color 0.16s ease,
+    box-shadow 0.16s ease,
     transform 0.14s ease;
 }
 
 .session-card:hover {
-  background: var(--bg-hover);
+  border-color: var(--border-strong);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-float);
   transform: translateY(-1px);
 }
 
 .session-card.active {
   border-color: var(--accent-line);
   background: var(--accent-tint);
+  box-shadow: var(--shadow-panel);
+  transform: none;
+}
+
+/* 选中态左侧的品牌渐变指示条，进一步区分当前会话。 */
+.session-card.active::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 3px;
+  width: 3px;
+  height: 24px;
+  transform: translateY(-50%);
+  border-radius: var(--radius-pill);
+  background: var(--accent-gradient);
 }
 
 .session-icon {
@@ -475,36 +495,48 @@ button {
   width: 30px;
   height: 30px;
   place-items: center;
-  border-radius: 9px;
+  border-radius: 10px;
   color: var(--text-dim);
   background: rgb(74 58 20 / 7%);
   transition:
     color 0.16s ease,
-    background 0.16s ease;
+    background 0.16s ease,
+    box-shadow 0.16s ease;
+}
+
+.session-card:hover .session-icon {
+  color: var(--text-muted);
+  background: rgb(74 58 20 / 10%);
 }
 
 .session-card.active .session-icon {
   color: #ffffff;
   background: var(--accent-gradient);
-  box-shadow: 0 0 14px rgb(139 124 255 / 40%);
+  box-shadow: 0 4px 12px rgb(139 124 255 / 40%);
 }
 
 .session-card-body {
   display: grid;
-  gap: 5px;
+  gap: 4px;
   min-width: 0;
 }
 
 .session-card-title {
   color: var(--text);
   font-size: 13px;
-  font-weight: 720;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.session-card.active .session-card-title {
+  color: var(--accent);
 }
 
 .session-card-preview {
   color: var(--text-muted);
   font-size: 12px;
   font-weight: 500;
+  line-height: 1.4;
 }
 
 .session-card-meta {
@@ -512,9 +544,15 @@ button {
   align-items: center;
   gap: 6px;
   min-width: 0;
+  margin-top: 2px;
   color: var(--text-dim);
   font-size: 11px;
   font-weight: 620;
+}
+
+.session-card-meta svg {
+  flex: 0 0 auto;
+  opacity: 0.8;
 }
 
 .session-card-meta span {
