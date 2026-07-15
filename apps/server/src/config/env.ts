@@ -31,6 +31,13 @@ const envSchema = z.object({
     .transform((value) => value === "true" || value === "1"),
   AUTH_DEV_MOCK_NAME: z.string().default("Muse Dev User"),
 
+  // 本地工具人工审批超时（毫秒）。远长于执行超时，给手机/桌面留出确认时间。
+  MUSE_APPROVAL_TIMEOUT_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(120_000),
+
   // 本地 bash 工具默认关闭。只应在可信本机开发环境中开启。
   MUSE_LOCAL_BASH_ENABLED: z
     .enum(["true", "false", "1", "0"])

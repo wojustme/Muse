@@ -5,6 +5,7 @@ import type {
 } from "@muse/shared";
 
 const TOKEN_KEY = "muse.auth.token";
+const CLIENT_ID_KEY = "muse.clientId";
 
 export type MuseApiClientOptions = {
   serverUrl: string;
@@ -21,6 +22,11 @@ export type ChallengeResult = {
 export type DevLoginResult = {
   token: string;
   user: AuthUser;
+};
+
+export type ApprovalDecisionResult = {
+  ok: boolean;
+  settled: boolean;
 };
 
 function resolveStorage(
@@ -55,6 +61,42 @@ export function createMuseApiClient(options: MuseApiClientOptions) {
   function authHeaders(): Record<string, string> {
     const token = loadToken();
     return token ? { authorization: `Bearer ${token}` } : {};
+  }
+
+  // 稳定的客户端标识：用于事件流去重（exceptClientId）与上报当前会话。
+  function loadClientId(): string {
+    const existing = storage?.getItem(CLIENT_ID_KEY);
+    if (existing) {
+      return existing;
+    }
+    const next =
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `client-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    storage?.setItem(CLIENT_ID_KEY, next);
+    return next;
+  }
+
+  // 事件流 URL（GET /api/events?clientId=...）。用 fetch+ReadableStream 消费，
+  // 因原生 EventSource 不支持自定义 Authorization 头。
+  function eventsUrl(clientId: string): string {
+    return `${options.serverUrl}/api/events?clientId=${encodeURIComponent(clientId)}`;
+  }
+
+  // 上报当前打开的会话页；sessionId 为 null 表示离开会话页。best-effort，不抛错。
+  async function postActiveSession(
+    clientId: string,
+    sessionId: string | null,
+  ): Promise<void> {
+    try {
+      await fetch(`${options.serverUrl}/api/events/active`, {
+        method: "POST",
+        headers: { "content-type": "application/json", ...authHeaders() },
+        body: JSON.stringify({ clientId, sessionId }),
+      });
+    } catch {
+      // 网络抖动时忽略，下次切换会话会再次上报。
+    }
   }
 
   async function startFeishuChallenge(): Promise<ChallengeResult> {
@@ -138,13 +180,35 @@ export function createMuseApiClient(options: MuseApiClientOptions) {
     }
   }
 
+  // 回传本地工具审批决策（手机端 HTTP 通道）。settled=false 表示已被其他端先定（竞态）。
+  async function postApprovalDecision(
+    approvalId: string,
+    decision: "approved" | "rejected",
+  ): Promise<ApprovalDecisionResult> {
+    const response = await fetch(`${options.serverUrl}/api/chat/approval`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ approvalId, decision }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`提交审批决定失败（${response.status}）`);
+    }
+
+    return (await response.json()) as ApprovalDecisionResult;
+  }
+
   return {
     authHeaders,
     clearToken,
     devLogin,
+    eventsUrl,
     fetchMe,
+    loadClientId,
     loadToken,
     logout,
+    postActiveSession,
+    postApprovalDecision,
     pollChallengeStatus,
     saveToken,
     startFeishuChallenge,

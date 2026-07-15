@@ -4,9 +4,13 @@ import type { FastifyBaseLogger } from "fastify";
 import type { RawData, WebSocket } from "ws";
 import {
   localToolClientMessageSchema,
+  type ApprovalDecidedBy,
+  type ApprovalDecision,
   type LocalToolClientMessage,
+  type LocalToolServerMessage,
 } from "@muse/shared";
 import { verifySession } from "../auth/session.js";
+import { ApprovalCoordinator } from "./approval-coordinator.js";
 import { DeviceRegistry, parseSocketMessage } from "./device-registry.js";
 import { LocalToolBroker } from "./local-tool-broker.js";
 
@@ -123,11 +127,87 @@ function handleClientMessage(input: {
       });
       return;
     }
+
+    case "approval.decision": {
+      // 桌面回传审批决策。校验 pending 归属，防止跨用户越权。
+      const pending = approvalCoordinator.getPending(
+        message.payload.approvalId,
+      );
+      if (!pending || pending.userId !== userId) {
+        return;
+      }
+      resolveApproval(
+        message.payload.approvalId,
+        message.payload.decision,
+        "desktop",
+        log,
+      );
+      return;
+    }
   }
 }
 
 export const localToolDevices = new DeviceRegistry();
 export const localToolBroker = new LocalToolBroker(localToolDevices);
+export const approvalCoordinator = new ApprovalCoordinator();
+
+// 向该用户所有在线桌面广播审批请求。任一台桌面均可审批；执行仍定向到指定设备。
+export function broadcastApprovalRequest(
+  userId: string,
+  payload: Extract<
+    LocalToolServerMessage,
+    { type: "approval.request" }
+  >["payload"],
+): void {
+  const message: LocalToolServerMessage = {
+    type: "approval.request",
+    payload,
+  };
+  const serialized = JSON.stringify(message);
+  for (const device of localToolDevices.getDevicesForUser(userId)) {
+    device.socket.send(serialized);
+  }
+}
+
+// 向该用户所有在线桌面广播审批已定，供关闭其他桌面上仍开着的弹窗。
+export function broadcastApprovalResolved(
+  userId: string,
+  approvalId: string,
+  decision: ApprovalDecision,
+  decidedBy: ApprovalDecidedBy,
+): void {
+  const message: LocalToolServerMessage = {
+    type: "approval.resolved",
+    payload: { approvalId, decision, decidedBy },
+  };
+  const serialized = JSON.stringify(message);
+  for (const device of localToolDevices.getDevicesForUser(userId)) {
+    device.socket.send(serialized);
+  }
+}
+
+// 统一的审批 settle 入口：先在协调器登记决策，成功后向桌面广播收敛弹窗。
+// 返回是否为首次 settle（竞态去抖：后到者返回 false）。
+export function resolveApproval(
+  approvalId: string,
+  decision: ApprovalDecision,
+  decidedBy: ApprovalDecidedBy,
+  log?: FastifyBaseLogger,
+): boolean {
+  const pending = approvalCoordinator.getPending(approvalId);
+  if (!pending) {
+    return false;
+  }
+  const settled = approvalCoordinator.resolve(approvalId, decision, decidedBy);
+  if (settled) {
+    broadcastApprovalResolved(pending.userId, approvalId, decision, decidedBy);
+    log?.info(
+      { approvalId, decision, decidedBy, userId: pending.userId },
+      "local tool approval resolved",
+    );
+  }
+  return settled;
+}
 
 export function installLocalToolSocket(input: {
   server: import("node:http").Server;

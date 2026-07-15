@@ -58,4 +58,23 @@ export function logout() {
   return client().logout();
 }
 
+export function postApprovalDecision(
+  approvalId: string,
+  decision: "approved" | "rejected",
+) {
+  return client().postApprovalDecision(approvalId, decision);
+}
+
+export function loadClientId() {
+  return client().loadClientId();
+}
+
+export function eventsUrl(clientId: string) {
+  return client().eventsUrl(clientId);
+}
+
+export function postActiveSession(clientId: string, sessionId: string | null) {
+  return client().postActiveSession(clientId, sessionId);
+}
+
 export type { ChallengeResult } from "@muse/api-client";

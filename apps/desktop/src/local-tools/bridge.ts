@@ -1,5 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  ApprovalDecision,
+  ApprovalRequestMessage,
+  ApprovalResolvedMessage,
   LocalToolManifest,
   LocalToolServerMessage,
   ToolResultMessage,
@@ -91,12 +94,20 @@ type CommandRunResult = {
   stderrTruncated: boolean;
 };
 
+// 服务端 WS 广播来的审批请求负载。桌面据此弹窗，用户决定后回传 approval.decision。
+export type DesktopApprovalRequest = ApprovalRequestMessage["payload"];
+// 服务端 WS 广播来的审批已定负载。
+export type DesktopApprovalResolved = ApprovalResolvedMessage["payload"];
+
 type LocalToolBridgeOptions = {
   serverUrl: string;
   // 初始工作区，null 表示空工作区（不挂载目录）。运行期可通过 setWorkspace 修改。
   workspace: WorkspaceBinding | null;
   onStatus?: (snapshot: LocalToolBridgeSnapshot) => void;
-  onApproval?: (request: LocalToolApprovalRequest) => Promise<boolean>;
+  // 收到服务端审批请求：由上层弹窗，决定后调用 sendApprovalDecision 回传（火发即忘）。
+  onApprovalRequest?: (request: DesktopApprovalRequest) => void;
+  // 审批已定（本端或其他端）：上层据此关闭仍开着的弹窗。
+  onApprovalResolved?: (resolved: DesktopApprovalResolved) => void;
 };
 
 const manifests: LocalToolManifest[] = [
@@ -437,12 +448,38 @@ export class LocalToolBridge {
     }
   }
 
+  // 回传审批决策给服务端（任一端先回传即定，服务端做竞态去抖）。
+  sendApprovalDecision(approvalId: string, decision: ApprovalDecision) {
+    this.send({
+      type: "approval.decision",
+      payload: {
+        approvalId,
+        deviceId: this.deviceId,
+        decision,
+      },
+    });
+  }
+
   private async handleMessage(raw: unknown) {
     const message = JSON.parse(String(raw)) as LocalToolServerMessage;
+
+    // 审批请求：转发给上层弹窗，不在此处执行/等待。
+    if (message.type === "approval.request") {
+      this.options.onApprovalRequest?.(message.payload);
+      return;
+    }
+
+    // 审批已定：通知上层收敛（关闭其他端仍开着的弹窗）。
+    if (message.type === "approval.resolved") {
+      this.options.onApprovalResolved?.(message.payload);
+      return;
+    }
+
     if (message.type !== "tool.request") {
       return;
     }
 
+    // 收到 tool.request 表示服务端已完成审批（若需审批），桌面直接执行。
     const { requestId, toolName } = message.payload;
 
     try {
@@ -524,27 +561,7 @@ export class LocalToolBridge {
         throw new Error("Missing content.");
       }
 
-      const preview =
-        content.length > 4000
-          ? `${content.slice(0, 4000)}\n[content preview truncated]`
-          : content;
-      const approved = await this.requestApproval({
-        id: crypto.randomUUID(),
-        toolName,
-        title: "Write local file",
-        riskLevel: "write",
-        workspace,
-        details: [
-          { label: "Workspace", value: workspace.displayName },
-          { label: "Path", value: path },
-          { label: "Bytes", value: String(new TextEncoder().encode(content).length) },
-          { label: "New content", value: preview },
-        ],
-      });
-      if (!approved) {
-        throw new Error("USER_REJECTED");
-      }
-
+      // 审批已在服务端完成（收到 tool.request 即代表已批准），此处直接写入。
       return invoke<FileWriteResult>("write_workspace_file", {
         path,
         content,
@@ -562,27 +579,7 @@ export class LocalToolBridge {
         throw new Error("Missing patch.");
       }
 
-      const preview =
-        patch.length > 8000
-          ? `${patch.slice(0, 8000)}\n[patch preview truncated]`
-          : patch;
-      const approved = await this.requestApproval({
-        id: crypto.randomUUID(),
-        toolName,
-        title: "Apply local patch",
-        riskLevel: "write",
-        workspace,
-        details: [
-          { label: "Workspace", value: workspace.displayName },
-          { label: "Path", value: path },
-          { label: "Patch bytes", value: String(new TextEncoder().encode(patch).length) },
-          { label: "Unified diff", value: preview },
-        ],
-      });
-      if (!approved) {
-        throw new Error("USER_REJECTED");
-      }
-
+      // 审批已在服务端完成，此处直接应用补丁。
       return invoke<PatchApplyResult>("apply_workspace_patch", {
         path,
         patch,
@@ -597,22 +594,7 @@ export class LocalToolBridge {
       }
 
       const cwd = inputCwd(args);
-      const approved = await this.requestApproval({
-        id: crypto.randomUUID(),
-        toolName,
-        title: "Run local command",
-        riskLevel: "dangerous",
-        workspace,
-        details: [
-          { label: "Workspace", value: workspace.displayName },
-          { label: "Working directory", value: cwd },
-          { label: "Command", value: command },
-        ],
-      });
-      if (!approved) {
-        throw new Error("USER_REJECTED");
-      }
-
+      // 审批已在服务端完成，此处直接执行命令。
       return invoke<CommandRunResult>("run_workspace_command", {
         command,
         cwd,
@@ -623,19 +605,5 @@ export class LocalToolBridge {
     }
 
     throw new Error(`Unknown tool: ${toolName}`);
-  }
-
-  private async requestApproval(
-    request: LocalToolApprovalRequest,
-  ): Promise<boolean> {
-    if (this.options.onApproval) {
-      return this.options.onApproval(request);
-    }
-
-    return window.confirm(
-      `${request.title}\n\n${request.details
-        .map((detail) => `${detail.label}: ${detail.value}`)
-        .join("\n")}`,
-    );
   }
 }

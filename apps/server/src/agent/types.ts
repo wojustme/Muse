@@ -1,4 +1,10 @@
 import type { ToolSet } from "ai";
+import type {
+  ApprovalDecidedBy,
+  ChatApprovalRequest,
+  ChatApprovalResolved,
+} from "@muse/shared";
+import type { ApprovalCoordinator } from "../local-tools/approval-coordinator.js";
 import type { LocalToolBroker } from "../local-tools/local-tool-broker.js";
 
 export type ToolSource = "builtin" | "mcp" | "local" | "remote";
@@ -13,6 +19,8 @@ export type ToolExecutionContext = {
   // 用户是否在本次请求中开启了联网检索（客户端 Search 开关）。
   webSearchRequested?: boolean;
   localToolBroker?: LocalToolBroker;
+  // 本地工具审批协调器：拦截需审批的工具，等待任一端（手机/桌面）回传决策。
+  approvalCoordinator?: ApprovalCoordinator;
   onToolEvent?: (event: MuseToolRuntimeEvent) => void;
 };
 
@@ -48,4 +56,8 @@ export type MuseToolRuntimeEvent =
       status: "succeeded" | "failed";
       output?: unknown;
       error?: string;
-    };
+    }
+  | ({ type: "approval-request" } & ChatApprovalRequest)
+  | ({ type: "approval-resolved" } & ChatApprovalResolved);
+
+export type { ApprovalDecidedBy };

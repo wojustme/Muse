@@ -126,6 +126,18 @@ export class DeviceRegistry {
     return device;
   }
 
+  // 该用户当前所有在线设备（审批广播用：任一在线桌面均可审批）。
+  getDevicesForUser(userId: string): RegisteredDevice[] {
+    const ids = this.userDeviceIds.get(userId);
+    if (!ids) {
+      return [];
+    }
+
+    return [...ids]
+      .map((id) => this.devicesById.get(id))
+      .filter((device): device is RegisteredDevice => Boolean(device));
+  }
+
   listUserDevices(userId: string): DeviceRegistrySnapshot[] {
     const ids = this.userDeviceIds.get(userId);
     if (!ids) {

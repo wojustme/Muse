@@ -23,7 +23,12 @@ import {
   modelRuns,
   toolCalls,
 } from "../db/schema.js";
-import { localToolBroker } from "../local-tools/local-tool-socket.js";
+import { sessionEventHub } from "../events/session-event-hub.js";
+import {
+  approvalCoordinator,
+  localToolBroker,
+  resolveApproval,
+} from "../local-tools/local-tool-socket.js";
 import { getAuthorizedModel } from "../models/authorized.js";
 
 const textPartSchema = z.object({
@@ -33,6 +38,8 @@ const textPartSchema = z.object({
 
 const chatRequestSchema = z.object({
   sessionId: z.string().min(1),
+  // 发起端标识：用于事件广播时跳过发起端自身（其通过本次 SSE 流已实时看到）。
+  clientId: z.string().min(1).max(128).optional(),
   message: z.object({
     id: z.string().optional(),
     role: z.literal("user"),
@@ -82,6 +89,12 @@ const chatRequestSchema = z.object({
         .optional(),
     })
     .optional(),
+});
+
+// 审批决策回传：手机端通过此 POST 端点提交批准/拒绝（桌面走 WS）。
+const approvalDecisionRequestSchema = z.object({
+  approvalId: z.string().min(1),
+  decision: z.enum(["approved", "rejected"]),
 });
 
 function titleFromPrompt(prompt: string): string {
@@ -210,8 +223,8 @@ function buildLocalToolSystemPrompt(input: {
     "Use LS to list directories inside the attached macOS workspace.",
     "Use Read to read a text file inside the attached macOS workspace.",
     "Use Grep to search text inside files in the attached macOS workspace.",
-    "Use Write to create or overwrite a text file after desktop approval.",
-    "Use Edit for targeted edits to existing text files after desktop approval.",
+    "Use Write to create or overwrite a text file after user approval.",
+    "Use Edit for targeted edits to existing text files after user approval.",
     "Use Bash only when the user explicitly asks to run a shell command or when no safer local tool fits.",
     "Use ServerBash only when the user explicitly asks to operate on the Muse server host instead of the attached macOS workspace.",
     "Muse application tools use the muse_* prefix and are for app state such as session history, available models, and current time.",
@@ -302,6 +315,37 @@ async function persistToolCalls(input: {
 }
 
 export async function chatRoutes(app: FastifyInstance) {
+  // 手机端审批决策回传：桌面走 WS，手机走此 HTTP 端点。
+  // 校验回传者 userId 与 pending 归属一致，防跨用户越权；幂等（竞态后到者 settled=false）。
+  app.post(
+    "/chat/approval",
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const parsed = approvalDecisionRequestSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({
+          error: "Invalid approval decision",
+          issues: parsed.error.flatten(),
+        });
+      }
+
+      const userId = request.userId as string;
+      const pending = approvalCoordinator.getPending(parsed.data.approvalId);
+      if (!pending || pending.userId !== userId) {
+        // 不存在/已定/越权：一律幂等返回，避免泄露他人审批的存在性。
+        return reply.send({ ok: true, settled: false });
+      }
+
+      const settled = resolveApproval(
+        parsed.data.approvalId,
+        parsed.data.decision,
+        "mobile",
+        request.log,
+      );
+      return reply.send({ ok: true, settled });
+    },
+  );
+
   app.post("/chat", { preHandler: requireAuth }, async (request, reply) => {
     const parsed = chatRequestSchema.safeParse(request.body);
 
@@ -396,6 +440,7 @@ export async function chatRoutes(app: FastifyInstance) {
       workspaceId: parsed.data.localTools?.workspaceId,
       webSearchRequested: parsed.data.webSearch ?? false,
       localToolBroker,
+      approvalCoordinator,
       onToolEvent: (event) => {
         if (!raw || raw.writableEnded) {
           return;
@@ -484,13 +529,34 @@ export async function chatRoutes(app: FastifyInstance) {
       });
     });
 
+    // 用户消息已落库：向该用户的其他在线端实时推送（发起端自己不重复推）。
+    sessionEventHub.publish(
+      userId,
+      {
+        type: "message.created",
+        sessionId,
+        message: {
+          id: userMessageId,
+          role: "user",
+          text: prompt,
+          createdAt: now.toISOString(),
+        },
+        originClientId: parsed.data.clientId,
+      },
+      { exceptClientId: parsed.data.clientId },
+    );
+
     // SSE 响应：直接接管底层 socket 写 event-stream。
     // reply.hijack() 让 Fastify 不再管理响应生命周期，避免它按普通响应
     // 计算 content-length / 走 onSend 钩子而把流“压平”成空响应。
     raw = reply.raw;
     // 客户端断开时中止模型流，避免继续消耗额度与句柄。
     const abortController = new AbortController();
-    request.raw.on("close", () => abortController.abort());
+    request.raw.on("close", () => {
+      abortController.abort();
+      // 发起方断开：取消本 run 所有待审批，避免审批 Promise 悬挂到超时。
+      approvalCoordinator.failRun(runId, "CLIENT_DISCONNECTED");
+    });
 
     // hijack 会跳过 @fastify/cors 的 onSend，这里手动补齐 CORS（等价 origin:true 的回显）。
     const requestOrigin = request.headers.origin;
@@ -620,6 +686,36 @@ export async function chatRoutes(app: FastifyInstance) {
             .where(eq(chatSessions.id, sessionId));
         });
 
+        // AI 定稿已落库：向该用户的其他在线端推送最终消息与会话元信息更新。
+        sessionEventHub.publish(
+          userId,
+          {
+            type: "message.created",
+            sessionId,
+            message: {
+              id: assistantMessageId,
+              role: "assistant",
+              text: assistantText,
+              createdAt: completedAt.toISOString(),
+            },
+            originClientId: parsed.data.clientId,
+          },
+          { exceptClientId: parsed.data.clientId },
+        );
+        sessionEventHub.publish(
+          userId,
+          {
+            type: "session.updated",
+            session: buildSessionPayload(
+              completedAt,
+              previewFromText(assistantText),
+              2,
+            ),
+            originClientId: parsed.data.clientId,
+          },
+          { exceptClientId: parsed.data.clientId },
+        );
+
         // 终止事件：下发最终文本、工具调用与会话元信息，前端据此定稿气泡。
         writeSseEvent(raw, {
           type: "done",
@@ -682,6 +778,8 @@ export async function chatRoutes(app: FastifyInstance) {
           message,
         });
       } finally {
+        // 兜底：run 结束时清理仍未定的审批（正常已被 approval 阶段消费）。
+        approvalCoordinator.failRun(runId, "RUN_COMPLETED");
         // 结束 SSE 流；push(null) 触发底层响应的 end。
         raw.end();
       }

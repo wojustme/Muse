@@ -28,7 +28,15 @@ import {
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { AuthUser } from "@muse/shared";
-import { authHeaders, fetchMe, logout } from "./auth/client";
+import {
+  authHeaders,
+  eventsUrl,
+  fetchMe,
+  loadClientId,
+  logout,
+  postActiveSession,
+  postApprovalDecision,
+} from "./auth/client";
 import { LoginScreen } from "./auth/LoginScreen";
 import { MuseMark, MuseWordmark } from "./BrandMark";
 import { resolveServerUrl } from "./config/server-url";
@@ -54,10 +62,28 @@ type ToolRuntimeCall = {
   source?: string;
   riskLevel?: "read" | "write" | "dangerous";
   requiresApproval?: boolean;
-  status: "running" | "succeeded" | "failed";
+  status: "running" | "awaiting-approval" | "succeeded" | "failed";
   input?: unknown;
   output?: unknown;
   error?: string;
+};
+
+// 手机端审批弹窗数据：来自服务端 SSE 的 approval-request 事件。
+type ApprovalPrompt = {
+  approvalId: string;
+  eventId: string;
+  toolName: string;
+  riskLevel: "read" | "write" | "dangerous";
+  workspaceName?: string;
+  inputPreview: {
+    path?: string;
+    command?: string;
+    cwd?: string;
+    bytes?: number;
+    patchPreview?: string;
+    contentPreview?: string;
+  };
+  expiresAt: string;
 };
 
 type ModelSelection = {
@@ -377,11 +403,16 @@ function ToolCallList({ calls }: { calls: ToolRuntimeCall[] }) {
           <details
             className={`tool-call tool-call-${call.status}`}
             key={call.id}
-            open={call.status === "running" || call.status === "failed"}
+            open={
+              call.status === "running" ||
+              call.status === "awaiting-approval" ||
+              call.status === "failed"
+            }
           >
             <summary>
               <span className={`tool-call-status ${call.status}`}>
-                {call.status === "running" ? (
+                {call.status === "running" ||
+                call.status === "awaiting-approval" ? (
                   <Loader2 aria-hidden="true" size={13} strokeWidth={2.2} />
                 ) : call.status === "succeeded" ? (
                   <Check aria-hidden="true" size={13} strokeWidth={2.2} />
@@ -392,9 +423,11 @@ function ToolCallList({ calls }: { calls: ToolRuntimeCall[] }) {
               <Terminal aria-hidden="true" size={14} strokeWidth={2.1} />
               <span className="tool-call-name">{call.name}</span>
               <span className={`tool-call-risk ${call.riskLevel ?? "read"}`}>
-                {call.requiresApproval
-                  ? "approval"
-                  : (call.riskLevel ?? "read")}
+                {call.status === "awaiting-approval"
+                  ? "awaiting"
+                  : call.requiresApproval
+                    ? "approval"
+                    : (call.riskLevel ?? "read")}
               </span>
             </summary>
             <div className="tool-call-body">
@@ -455,6 +488,50 @@ async function fetchSessionMessages(sessionId: string): Promise<{
   };
 }
 
+// 把服务端消息合并进本地当前会话，用于跨端实时同步（轮询拉取）。
+// 规则：服务端为权威内容；保留本地正在流式/尚未持久化的消息；两端都有的保留本地 toolCalls。
+function mergeServerMessages(local: Message[], server: Message[]): Message[] {
+  const localById = new Map(local.map((message) => [message.id, message]));
+  const serverIds = new Set(server.map((message) => message.id));
+
+  const merged: Message[] = server.map((serverMessage) => {
+    const existing = localById.get(serverMessage.id);
+    if (!existing) {
+      return serverMessage;
+    }
+    if (existing.streaming) {
+      return existing;
+    }
+    return {
+      ...serverMessage,
+      toolCalls: existing.toolCalls ?? serverMessage.toolCalls,
+    };
+  });
+
+  for (const message of local) {
+    if (!serverIds.has(message.id)) {
+      merged.push(message);
+    }
+  }
+
+  return merged;
+}
+
+// 判断两组消息是否等价（避免轮询无变化时触发无谓 re-render）。
+function sameMessages(a: Message[], b: Message[]): boolean {
+  if (a.length !== b.length) {
+    return false;
+  }
+  for (let i = 0; i < a.length; i += 1) {
+    const left = a[i];
+    const right = b[i];
+    if (!left || !right || left.id !== right.id || left.text !== right.text) {
+      return false;
+    }
+  }
+  return true;
+}
+
 // SSE 事件形态：与后端 chat 路由的 writeSseEvent 一一对应。
 type ChatStreamEvent =
   | { type: "start"; id: string; sessionId: string; session?: ServerSession }
@@ -475,6 +552,31 @@ type ChatStreamEvent =
       status: "succeeded" | "failed";
       output?: unknown;
       error?: string;
+    }
+  | {
+      type: "approval-request";
+      approvalId: string;
+      eventId: string;
+      toolName: string;
+      riskLevel: "read" | "write" | "dangerous";
+      workspaceId?: string;
+      workspaceName?: string;
+      inputPreview: {
+        path?: string;
+        command?: string;
+        cwd?: string;
+        bytes?: number;
+        patchPreview?: string;
+        contentPreview?: string;
+      };
+      expiresAt: string;
+    }
+  | {
+      type: "approval-resolved";
+      approvalId: string;
+      eventId: string;
+      decision: "approved" | "rejected";
+      decidedBy?: string;
     }
   | {
       type: "done";
@@ -550,11 +652,20 @@ export function App() {
 
   useEffect(() => {
     let cancelled = false;
+    // 启动检查超时兜底：真机若 serverUrl 仍是默认 127.0.0.1，/api/auth/me 会
+    // 打向手机自身并长时间挂起（fetch 无超时），导致永远停在“正在检查登录状态…”。
+    // 超时即视为未登录，落到登录页，让用户先填局域网服务端地址再登录。
+    const timeout = setTimeout(() => {
+      if (!cancelled) {
+        setAuthState("out");
+      }
+    }, 3500);
     void fetchMe()
       .then((me) => {
         if (cancelled) {
           return;
         }
+        clearTimeout(timeout);
         if (me) {
           setUser(me);
           setAuthState("in");
@@ -564,11 +675,13 @@ export function App() {
       })
       .catch(() => {
         if (!cancelled) {
+          clearTimeout(timeout);
           setAuthState("out");
         }
       });
     return () => {
       cancelled = true;
+      clearTimeout(timeout);
     };
   }, []);
 
@@ -638,10 +751,20 @@ function ChatApp({
   const [renamingSessionId, setRenamingSessionId] = useState<string | null>(
     null,
   );
+  // 当前待审批的本地工具调用（来自 SSE approval-request）。null 表示无弹窗。
+  const [approvalPrompt, setApprovalPrompt] = useState<ApprovalPrompt | null>(
+    null,
+  );
+  const [approvalSubmitting, setApprovalSubmitting] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const conversationRef = useRef<HTMLDivElement | null>(null);
   const composerComposingRef = useRef(false);
   const composerCompositionEndedAtRef = useRef(0);
+  // 稳定的客户端标识：事件流去重与上报当前会话用。
+  const clientIdRef = useRef<string>(loadClientId());
+  const clientId = clientIdRef.current;
+  // 事件流是否已连通：连通时降级兜底轮询频率。
+  const [eventsConnected, setEventsConnected] = useState(false);
 
   // 远程桌面设备（借用工具）。仅在打开远程抽屉时按需拉取。
   const remote = useRemoteDevices(drawer === "remote");
@@ -730,6 +853,195 @@ function ChatApp({
       node.scrollTop = node.scrollHeight;
     }
   }, [messages.length, lastMessage?.text, activeSessionId]);
+
+  // 跨端同步兜底轮询：事件流连通时降到 20s（防丢事件），未连通时 2s 近实时。
+  // 发送/流式期间暂停，草稿会话无需轮询。
+  const activeSessionIsDraft = activeSession?.isDraft ?? true;
+  useEffect(() => {
+    if (isSending || activeSessionIsDraft || !activeSessionId) {
+      return;
+    }
+
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const intervalMs = eventsConnected ? 20_000 : 2000;
+
+    const poll = async () => {
+      try {
+        const loaded = await fetchSessionMessages(activeSessionId);
+        if (cancelled) {
+          return;
+        }
+        setSessions((current) =>
+          current.map((session) => {
+            if (session.id !== activeSessionId) {
+              return session;
+            }
+            const merged = mergeServerMessages(
+              session.messages,
+              loaded.messages,
+            );
+            if (sameMessages(session.messages, merged)) {
+              return session;
+            }
+            return { ...session, messages: merged, messagesLoaded: true };
+          }),
+        );
+      } catch {
+        // 轮询失败静默重试。
+      } finally {
+        if (!cancelled) {
+          timer = setTimeout(() => void poll(), intervalMs);
+        }
+      }
+    };
+
+    timer = setTimeout(() => void poll(), intervalMs);
+
+    return () => {
+      cancelled = true;
+      if (timer) {
+        clearTimeout(timer);
+      }
+    };
+  }, [activeSessionId, activeSessionIsDraft, isSending, eventsConnected]);
+
+  // 实时事件流：订阅 /api/events，接收对方端（桌面/手机）在同一 session 的消息推送。
+  // 用 fetch + ReadableStream（原生 EventSource 不支持自定义 Authorization 头）。
+  useEffect(() => {
+    let cancelled = false;
+    let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+    let retry = 0;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const applyEvent = (event: {
+      type?: string;
+      sessionId?: string;
+      message?: Message;
+      session?: {
+        id: string;
+        title?: string;
+        updatedAt?: string;
+        lastMessagePreview?: string;
+      };
+      originClientId?: string;
+    }) => {
+      if (event.originClientId && event.originClientId === clientId) {
+        return; // 自己发的，已在本地渲染。
+      }
+      if (event.type === "message.created" && event.sessionId && event.message) {
+        const incoming = event.message;
+        const sessionId = event.sessionId;
+        setSessions((current) =>
+          current.map((session) => {
+            if (session.id !== sessionId) {
+              return session;
+            }
+            const merged = mergeServerMessages(session.messages, [incoming]);
+            if (sameMessages(session.messages, merged)) {
+              return session;
+            }
+            return {
+              ...session,
+              messages: merged,
+              messagesLoaded: true,
+              preview: incoming.text || session.preview,
+              updatedAt: "Now",
+            };
+          }),
+        );
+      } else if (event.type === "session.updated" && event.session) {
+        const updated = event.session;
+        setSessions((current) =>
+          current.map((session) =>
+            session.id === updated.id
+              ? {
+                  ...session,
+                  title: updated.title ?? session.title,
+                  updatedAt: updated.updatedAt
+                    ? formatTime(updated.updatedAt)
+                    : session.updatedAt,
+                  preview: updated.lastMessagePreview ?? session.preview,
+                }
+              : session,
+          ),
+        );
+      }
+    };
+
+    const connect = async () => {
+      try {
+        const response = await fetch(eventsUrl(clientId), {
+          headers: authHeaders(),
+        });
+        if (!response.ok || !response.body) {
+          throw new Error(`events ${response.status}`);
+        }
+        reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        if (!cancelled) {
+          setEventsConnected(true);
+          retry = 0;
+        }
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done || cancelled) {
+            break;
+          }
+          buffer += decoder.decode(value, { stream: true });
+          let boundary = buffer.indexOf("\n\n");
+          while (boundary !== -1) {
+            const chunk = buffer.slice(0, boundary);
+            buffer = buffer.slice(boundary + 2);
+            boundary = buffer.indexOf("\n\n");
+            const dataLine = chunk
+              .split("\n")
+              .find((line) => line.startsWith("data:"));
+            if (!dataLine) {
+              continue;
+            }
+            try {
+              applyEvent(JSON.parse(dataLine.slice(5).trim()));
+            } catch {
+              // 忽略 hello/心跳等非 JSON 或无关负载。
+            }
+          }
+        }
+      } catch {
+        // 连接失败走重连。
+      } finally {
+        if (!cancelled) {
+          setEventsConnected(false);
+          retry = Math.min(retry + 1, 4);
+          const delay = [1000, 2000, 5000, 10_000, 10_000][retry] ?? 10_000;
+          retryTimer = setTimeout(() => void connect(), delay);
+        }
+      }
+    };
+
+    void connect();
+
+    return () => {
+      cancelled = true;
+      if (retryTimer) {
+        clearTimeout(retryTimer);
+      }
+      void reader?.cancel().catch(() => {});
+    };
+  }, [clientId]);
+
+  // 上报"当前打开的会话页"：仅当对端也在看同一 session 时服务端才推送该会话消息。
+  // 切换会话 / 落到草稿 / 卸载都会重新上报。
+  useEffect(() => {
+    const sessionId = activeSessionIsDraft ? null : activeSessionId || null;
+    void postActiveSession(clientId, sessionId);
+    return () => {
+      // 组件卸载（登出等）时上报离开会话页。
+      void postActiveSession(clientId, null);
+    };
+  }, [clientId, activeSessionId, activeSessionIsDraft]);
+
 
   const persistedSessions = useMemo(
     () => sessions.filter((session) => !session.isDraft),
@@ -1053,6 +1365,7 @@ function ChatApp({
         },
         body: JSON.stringify({
           sessionId: targetSessionId,
+          clientId,
           model: selectedModel,
           client: buildClientContext(remoteSelection),
           // 选择了远程桌面设备时借用其工具；否则为纯云端对话。
@@ -1168,6 +1481,53 @@ function ChatApp({
             }));
             break;
           }
+          case "approval-request": {
+            // 收到审批请求：把工具卡片标记为等待审批，并弹出审批弹窗。
+            ensureAssistantMessage();
+            updateMessage(targetSessionId, assistantMessageId, (message) => ({
+              ...message,
+              toolCalls: (message.toolCalls ?? []).map((toolCall) =>
+                toolCall.id === event.eventId
+                  ? { ...toolCall, status: "awaiting-approval" }
+                  : toolCall,
+              ),
+            }));
+            setApprovalPrompt({
+              approvalId: event.approvalId,
+              eventId: event.eventId,
+              toolName: event.toolName,
+              riskLevel: event.riskLevel,
+              workspaceName: event.workspaceName,
+              inputPreview: event.inputPreview,
+              expiresAt: event.expiresAt,
+            });
+            break;
+          }
+          case "approval-resolved": {
+            // 审批已定：关闭弹窗（若匹配），并收敛工具卡片状态。
+            setApprovalPrompt((current) =>
+              current && current.approvalId === event.approvalId
+                ? null
+                : current,
+            );
+            updateMessage(targetSessionId, assistantMessageId, (message) => ({
+              ...message,
+              toolCalls: (message.toolCalls ?? []).map((toolCall) =>
+                toolCall.id === event.eventId &&
+                toolCall.status === "awaiting-approval"
+                  ? {
+                      ...toolCall,
+                      status: event.decision === "approved" ? "running" : "failed",
+                      error:
+                        event.decision === "approved"
+                          ? toolCall.error
+                          : `审批未通过（${event.decidedBy ?? "rejected"}）`,
+                    }
+                  : toolCall,
+              ),
+            }));
+            break;
+          }
           case "done": {
             ensureAssistantMessage();
             const finalText = event.parts?.find(
@@ -1198,6 +1558,8 @@ function ChatApp({
             streaming: false,
           }));
         }
+        // 流结束仍挂着审批弹窗则关闭（避免悬挂）。
+        setApprovalPrompt(null);
         throw new Error(streamError);
       }
 
@@ -1244,6 +1606,31 @@ function ChatApp({
     event.preventDefault();
     void sendCurrentMessage();
   }
+
+  // 提交审批决策：乐观关闭弹窗，服务端 approval-resolved 会再收敛工具卡片状态。
+  async function submitApproval(decision: "approved" | "rejected") {
+    const prompt = approvalPrompt;
+    if (!prompt || approvalSubmitting) {
+      return;
+    }
+    setApprovalSubmitting(true);
+    try {
+      await postApprovalDecision(prompt.approvalId, decision);
+      setApprovalPrompt(null);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "提交审批失败");
+    } finally {
+      setApprovalSubmitting(false);
+    }
+  }
+
+  const isCommandApproval =
+    approvalPrompt?.toolName === "workspace.run_command";
+  const approvalTitle = approvalPrompt
+    ? isCommandApproval
+      ? "允许 Muse 执行此命令？"
+      : `允许 Muse 执行 ${approvalPrompt.toolName}？`
+    : "";
 
   const remoteLabel = remote.selection
     ? `${remote.selection.deviceName} · ${remote.selection.workspaceName}`
@@ -1596,6 +1983,100 @@ function ChatApp({
                 type="button"
               >
                 保存
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {approvalPrompt ? (
+        <div
+          aria-labelledby="approval-title"
+          aria-modal="true"
+          className="approval-backdrop"
+          role="dialog"
+        >
+          <section className="approval-dialog">
+            <div className="approval-header">
+              <div>
+                <span className={`approval-risk ${approvalPrompt.riskLevel}`}>
+                  {approvalPrompt.riskLevel}
+                </span>
+                <h2 id="approval-title">{approvalTitle}</h2>
+              </div>
+              {isCommandApproval ? (
+                <Terminal aria-hidden="true" size={22} strokeWidth={2.1} />
+              ) : (
+                <AlertCircle aria-hidden="true" size={22} strokeWidth={2.1} />
+              )}
+            </div>
+
+            <p className="approval-message">
+              该操作将在桌面端「{approvalPrompt.workspaceName ?? "工作区"}
+              」执行，确认后由桌面执行并回传结果。
+            </p>
+
+            <dl className="approval-details">
+              {approvalPrompt.inputPreview.command ? (
+                <div>
+                  <dt>命令</dt>
+                  <dd>
+                    <pre>{approvalPrompt.inputPreview.command}</pre>
+                  </dd>
+                </div>
+              ) : null}
+              {approvalPrompt.inputPreview.cwd ? (
+                <div>
+                  <dt>工作目录</dt>
+                  <dd>{approvalPrompt.inputPreview.cwd}</dd>
+                </div>
+              ) : null}
+              {approvalPrompt.inputPreview.path ? (
+                <div>
+                  <dt>路径</dt>
+                  <dd>{approvalPrompt.inputPreview.path}</dd>
+                </div>
+              ) : null}
+              {typeof approvalPrompt.inputPreview.bytes === "number" ? (
+                <div>
+                  <dt>字节</dt>
+                  <dd>{approvalPrompt.inputPreview.bytes}</dd>
+                </div>
+              ) : null}
+              {approvalPrompt.inputPreview.contentPreview ? (
+                <div>
+                  <dt>内容预览</dt>
+                  <dd>
+                    <pre>{approvalPrompt.inputPreview.contentPreview}</pre>
+                  </dd>
+                </div>
+              ) : null}
+              {approvalPrompt.inputPreview.patchPreview ? (
+                <div>
+                  <dt>补丁预览</dt>
+                  <dd>
+                    <pre>{approvalPrompt.inputPreview.patchPreview}</pre>
+                  </dd>
+                </div>
+              ) : null}
+            </dl>
+
+            <div className="approval-actions">
+              <button
+                className="approval-button secondary"
+                disabled={approvalSubmitting}
+                onClick={() => void submitApproval("rejected")}
+                type="button"
+              >
+                {isCommandApproval ? "不运行" : "拒绝"}
+              </button>
+              <button
+                className="approval-button primary"
+                disabled={approvalSubmitting}
+                onClick={() => void submitApproval("approved")}
+                type="button"
+              >
+                {isCommandApproval ? "运行命令" : "允许"}
               </button>
             </div>
           </section>

@@ -6,6 +6,7 @@ import { loadWebSearchConfig } from "./config/web-search-config.js";
 import { installLocalToolSocket } from "./local-tools/local-tool-socket.js";
 import { authRoutes } from "./routes/auth.js";
 import { chatRoutes } from "./routes/chat.js";
+import { eventsRoutes } from "./routes/events.js";
 import { healthRoutes } from "./routes/health.js";
 import { localToolRoutes } from "./routes/local-tools.js";
 import { modelRoutes } from "./routes/models.js";
@@ -33,6 +34,7 @@ await app.register(cors, {
 await app.register(healthRoutes, { prefix: "/health" });
 await app.register(authRoutes, { prefix: "/api" });
 await app.register(chatRoutes, { prefix: "/api" });
+await app.register(eventsRoutes, { prefix: "/api" });
 await app.register(localToolRoutes, { prefix: "/api" });
 await app.register(modelRoutes, { prefix: "/api" });
 await app.register(sessionRoutes, { prefix: "/api" });

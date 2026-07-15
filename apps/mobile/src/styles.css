@@ -518,6 +518,15 @@ button {
   background: rgb(200 68 42 / 12%);
 }
 
+.tool-call-status.awaiting-approval {
+  color: var(--warn);
+  background: rgb(200 137 15 / 12%);
+}
+
+.tool-call-status.awaiting-approval svg {
+  animation: spin 0.9s linear infinite;
+}
+
 .tool-call-risk {
   padding: 2px 6px;
   border-radius: 999px;
@@ -1287,4 +1296,67 @@ button {
 .approval-button.danger {
   color: #fff;
   background: var(--danger);
+}
+
+/* 审批弹窗：风险徽标与工具参数详情 */
+.approval-risk {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  color: var(--text-muted);
+  background: rgb(74 58 20 / 8%);
+  font-size: 11px;
+  font-weight: 760;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+
+.approval-risk.write,
+.approval-risk.dangerous {
+  color: var(--danger);
+  background: rgb(200 68 42 / 12%);
+}
+
+.approval-details {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  max-height: 46vh;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.approval-details > div {
+  display: grid;
+  gap: 4px;
+}
+
+.approval-details dt {
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 760;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+
+.approval-details dd {
+  margin: 0;
+  color: var(--text);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.approval-details pre {
+  max-height: 200px;
+  margin: 0;
+  overflow: auto;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgb(255 253 247 / 70%);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }

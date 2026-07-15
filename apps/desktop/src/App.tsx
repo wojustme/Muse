@@ -40,12 +40,19 @@ import remarkGfm from "remark-gfm";
 import type { AuthUser } from "@muse/shared";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { authHeaders, fetchMe, logout } from "./auth/client";
+import {
+  authHeaders,
+  eventsUrl,
+  fetchMe,
+  loadClientId,
+  logout,
+  postActiveSession,
+} from "./auth/client";
 import { MuseMark, MuseWordmark } from "./BrandMark";
 import { LoginScreen } from "./auth/LoginScreen";
 import {
   LocalToolBridge,
-  type LocalToolApprovalRequest,
+  type DesktopApprovalRequest,
   type LocalToolBridgeSnapshot,
   type WorkspaceBinding,
 } from "./local-tools/bridge";
@@ -66,7 +73,7 @@ type ToolRuntimeCall = {
   source?: string;
   riskLevel?: "read" | "write" | "dangerous";
   requiresApproval?: boolean;
-  status: "running" | "succeeded" | "failed";
+  status: "running" | "awaiting-approval" | "succeeded" | "failed";
   input?: unknown;
   output?: unknown;
   error?: string;
@@ -82,8 +89,9 @@ type ModelOption = ModelSelection & {
   capabilities?: string[];
 };
 
-type ApprovalPrompt = LocalToolApprovalRequest & {
-  resolve: (approved: boolean) => void;
+// 桌面审批弹窗数据：来自服务端 WS 的审批请求，附带本地生成的展示详情。
+type ApprovalPrompt = DesktopApprovalRequest & {
+  details: Array<{ label: string; value: string }>;
 };
 
 type Session = {
@@ -354,13 +362,47 @@ function formatTime(value: string | Date): string {
   }).format(date);
 }
 
-function approvalDetail(
+// 从审批请求的原始参数生成展示详情（Command/Workspace 等由弹窗单独处理）。
+function buildApprovalDetails(
+  request: DesktopApprovalRequest,
+): Array<{ label: string; value: string }> {
+  const args = (request.arguments ?? {}) as Record<string, unknown>;
+  const details: Array<{ label: string; value: string }> = [];
+
+  if (typeof args.path === "string") {
+    details.push({ label: "Path", value: args.path });
+  }
+  if (typeof args.content === "string") {
+    const bytes = new TextEncoder().encode(args.content).length;
+    details.push({ label: "Bytes", value: String(bytes) });
+    const preview =
+      args.content.length > 4000
+        ? `${args.content.slice(0, 4000)}\n[content preview truncated]`
+        : args.content;
+    details.push({ label: "New content", value: preview });
+  }
+  if (typeof args.patch === "string") {
+    const bytes = new TextEncoder().encode(args.patch).length;
+    details.push({ label: "Patch bytes", value: String(bytes) });
+    const preview =
+      args.patch.length > 8000
+        ? `${args.patch.slice(0, 8000)}\n[patch preview truncated]`
+        : args.patch;
+    details.push({ label: "Unified diff", value: preview });
+  }
+
+  return details;
+}
+
+function approvalArg(
   prompt: ApprovalPrompt | null,
-  label: string,
+  key: string,
 ): string | null {
-  return (
-    prompt?.details.find((detail) => detail.label === label)?.value ?? null
-  );
+  if (!prompt || !prompt.arguments || typeof prompt.arguments !== "object") {
+    return null;
+  }
+  const value = (prompt.arguments as Record<string, unknown>)[key];
+  return typeof value === "string" && value.trim() ? value : null;
 }
 
 async function fetchModels(): Promise<ModelOption[]> {
@@ -565,11 +607,16 @@ function ToolCallList({ calls }: { calls: ToolRuntimeCall[] }) {
           <details
             className={`tool-call tool-call-${call.status}`}
             key={call.id}
-            open={call.status === "running" || call.status === "failed"}
+            open={
+              call.status === "running" ||
+              call.status === "awaiting-approval" ||
+              call.status === "failed"
+            }
           >
             <summary>
               <span className={`tool-call-status ${call.status}`}>
-                {call.status === "running" ? (
+                {call.status === "running" ||
+                call.status === "awaiting-approval" ? (
                   <Loader2 aria-hidden="true" size={13} strokeWidth={2.2} />
                 ) : call.status === "succeeded" ? (
                   <Check aria-hidden="true" size={13} strokeWidth={2.2} />
@@ -580,7 +627,11 @@ function ToolCallList({ calls }: { calls: ToolRuntimeCall[] }) {
               <Terminal aria-hidden="true" size={14} strokeWidth={2.1} />
               <span className="tool-call-name">{call.name}</span>
               <span className={`tool-call-risk ${call.riskLevel ?? "read"}`}>
-                {call.requiresApproval ? "approval" : (call.riskLevel ?? "read")}
+                {call.status === "awaiting-approval"
+                  ? "awaiting"
+                  : call.requiresApproval
+                    ? "approval"
+                    : (call.riskLevel ?? "read")}
               </span>
             </summary>
             <div className="tool-call-body">
@@ -639,6 +690,58 @@ async function fetchSessionMessages(sessionId: string): Promise<{
   };
 }
 
+// 把服务端消息合并进本地当前会话，用于跨端实时同步（轮询拉取）。
+// 规则：
+// - 服务端消息为权威内容（对方端发的会出现在这里）；
+// - 保留本地正在流式输出、或服务端尚未持久化的"在流"消息（按 id 不在服务端列表）；
+// - 对两端都有的消息，保留本地已附加的 toolCalls（服务端 /messages 不返回工具调用）。
+function mergeServerMessages(
+  local: Message[],
+  server: Message[],
+): Message[] {
+  const localById = new Map(local.map((message) => [message.id, message]));
+  const serverIds = new Set(server.map((message) => message.id));
+
+  const merged: Message[] = server.map((serverMessage) => {
+    const existing = localById.get(serverMessage.id);
+    if (!existing) {
+      return serverMessage;
+    }
+    // 本地仍在流式：以本地为准，等流结束/定稿再由服务端覆盖。
+    if (existing.streaming) {
+      return existing;
+    }
+    return {
+      ...serverMessage,
+      toolCalls: existing.toolCalls ?? serverMessage.toolCalls,
+    };
+  });
+
+  // 追加本地独有（尚未持久化到服务端）的在流消息，保持其相对顺序。
+  for (const message of local) {
+    if (!serverIds.has(message.id)) {
+      merged.push(message);
+    }
+  }
+
+  return merged;
+}
+
+// 判断两组消息是否等价（避免轮询无变化时触发无谓 re-render）。
+function sameMessages(a: Message[], b: Message[]): boolean {
+  if (a.length !== b.length) {
+    return false;
+  }
+  for (let i = 0; i < a.length; i += 1) {
+    const left = a[i];
+    const right = b[i];
+    if (!left || !right || left.id !== right.id || left.text !== right.text) {
+      return false;
+    }
+  }
+  return true;
+}
+
 // SSE 事件形态：与后端 chat 路由的 writeSseEvent 一一对应。
 type ChatStreamEvent =
   | { type: "start"; id: string; sessionId: string; session?: ServerSession }
@@ -659,6 +762,24 @@ type ChatStreamEvent =
       status: "succeeded" | "failed";
       output?: unknown;
       error?: string;
+    }
+  | {
+      type: "approval-request";
+      approvalId: string;
+      eventId: string;
+      toolName: string;
+      riskLevel?: "read" | "write" | "dangerous";
+      workspaceId?: string;
+      workspaceName?: string;
+      inputPreview?: unknown;
+      expiresAt?: string;
+    }
+  | {
+      type: "approval-resolved";
+      approvalId: string;
+      eventId: string;
+      decision: "approved" | "rejected";
+      decidedBy?: string;
     }
   | {
       type: "done";
@@ -837,6 +958,11 @@ function ChatApp({
   const localToolBridgeRef = useRef<LocalToolBridge | null>(null);
   const composerComposingRef = useRef(false);
   const composerCompositionEndedAtRef = useRef(0);
+  // 稳定的客户端标识：事件流去重与上报当前会话用。
+  const clientIdRef = useRef<string>(loadClientId());
+  const clientId = clientIdRef.current;
+  // 事件流是否已连通：连通时降级兜底轮询频率。
+  const [eventsConnected, setEventsConnected] = useState(false);
 
   useEffect(() => {
     const bridge = new LocalToolBridge({
@@ -844,13 +970,17 @@ function ChatApp({
       // undefined（首次运行、尚未加载 HOME）时先按空工作区连接，加载完成后再由下方 effect 挂载默认预设。
       workspace: currentWorkspace ?? null,
       onStatus: setLocalToolSnapshot,
-      onApproval: (request) =>
-        new Promise<boolean>((resolve) => {
-          setApprovalPrompt({
-            ...request,
-            resolve,
-          });
+      // 收到服务端审批请求：弹窗展示，用户决定后经 sendApprovalDecision 回传。
+      onApprovalRequest: (request) =>
+        setApprovalPrompt({
+          ...request,
+          details: buildApprovalDetails(request),
         }),
+      // 审批已定（本端或其他端/超时）：关闭仍开着的弹窗。
+      onApprovalResolved: (resolved) =>
+        setApprovalPrompt((current) =>
+          current && current.approvalId === resolved.approvalId ? null : current,
+        ),
     });
     localToolBridgeRef.current = bridge;
     setLocalToolSnapshot(bridge.snapshot());
@@ -858,10 +988,7 @@ function ChatApp({
 
     return () => {
       bridge.disconnect();
-      setApprovalPrompt((current) => {
-        current?.resolve(false);
-        return null;
-      });
+      setApprovalPrompt(null);
       if (localToolBridgeRef.current === bridge) {
         localToolBridgeRef.current = null;
       }
@@ -999,6 +1126,192 @@ function ChatApp({
       node.scrollTop = node.scrollHeight;
     }
   }, [messages.length, lastMessage?.text, activeSessionId]);
+
+  // 跨端同步兜底轮询：事件流连通时降到 20s（防丢事件），未连通时 2s 近实时。
+  // 发送/流式期间暂停，避免与本地打字机状态打架；草稿会话无需轮询。
+  const activeSessionIsDraft = activeSession?.isDraft ?? true;
+  useEffect(() => {
+    if (isSending || activeSessionIsDraft || !activeSessionId) {
+      return;
+    }
+
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const intervalMs = eventsConnected ? 20_000 : 2000;
+
+    const poll = async () => {
+      try {
+        const loaded = await fetchSessionMessages(activeSessionId);
+        if (cancelled) {
+          return;
+        }
+        setSessions((current) =>
+          current.map((session) => {
+            if (session.id !== activeSessionId) {
+              return session;
+            }
+            const merged = mergeServerMessages(
+              session.messages,
+              loaded.messages,
+            );
+            if (sameMessages(session.messages, merged)) {
+              return session;
+            }
+            return { ...session, messages: merged, messagesLoaded: true };
+          }),
+        );
+      } catch {
+        // 轮询失败静默重试，不打断当前会话。
+      } finally {
+        if (!cancelled) {
+          timer = setTimeout(() => void poll(), intervalMs);
+        }
+      }
+    };
+
+    timer = setTimeout(() => void poll(), intervalMs);
+
+    return () => {
+      cancelled = true;
+      if (timer) {
+        clearTimeout(timer);
+      }
+    };
+  }, [activeSessionId, activeSessionIsDraft, isSending, eventsConnected]);
+
+  // 实时事件流：订阅 /api/events，接收对方端在同一 session 的消息推送。
+  // 用 fetch + ReadableStream（原生 EventSource 不支持自定义 Authorization 头）。
+  useEffect(() => {
+    let cancelled = false;
+    let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+    let retry = 0;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const applyEvent = (event: {
+      type?: string;
+      sessionId?: string;
+      message?: Message;
+      session?: {
+        id: string;
+        title?: string;
+        updatedAt?: string;
+        lastMessagePreview?: string;
+      };
+      originClientId?: string;
+    }) => {
+      if (event.originClientId && event.originClientId === clientId) {
+        return; // 自己发的，已在本地渲染。
+      }
+      if (event.type === "message.created" && event.sessionId && event.message) {
+        const incoming = event.message;
+        const sessionId = event.sessionId;
+        setSessions((current) =>
+          current.map((session) => {
+            if (session.id !== sessionId) {
+              return session;
+            }
+            const merged = mergeServerMessages(session.messages, [incoming]);
+            if (sameMessages(session.messages, merged)) {
+              return session;
+            }
+            return {
+              ...session,
+              messages: merged,
+              messagesLoaded: true,
+              preview: incoming.text || session.preview,
+            };
+          }),
+        );
+      } else if (event.type === "session.updated" && event.session) {
+        const updated = event.session;
+        setSessions((current) =>
+          current.map((session) =>
+            session.id === updated.id
+              ? {
+                  ...session,
+                  title: updated.title ?? session.title,
+                  updatedAt: updated.updatedAt
+                    ? formatTime(updated.updatedAt)
+                    : session.updatedAt,
+                  preview: updated.lastMessagePreview ?? session.preview,
+                }
+              : session,
+          ),
+        );
+      }
+    };
+
+    const connect = async () => {
+      try {
+        const response = await fetch(eventsUrl(clientId), {
+          headers: authHeaders(),
+        });
+        if (!response.ok || !response.body) {
+          throw new Error(`events ${response.status}`);
+        }
+        reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        if (!cancelled) {
+          setEventsConnected(true);
+          retry = 0;
+        }
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done || cancelled) {
+            break;
+          }
+          buffer += decoder.decode(value, { stream: true });
+          let boundary = buffer.indexOf("\n\n");
+          while (boundary !== -1) {
+            const chunk = buffer.slice(0, boundary);
+            buffer = buffer.slice(boundary + 2);
+            boundary = buffer.indexOf("\n\n");
+            const dataLine = chunk
+              .split("\n")
+              .find((line) => line.startsWith("data:"));
+            if (!dataLine) {
+              continue;
+            }
+            try {
+              applyEvent(JSON.parse(dataLine.slice(5).trim()));
+            } catch {
+              // 忽略 hello/心跳等非 JSON 或无关负载。
+            }
+          }
+        }
+      } catch {
+        // 连接失败走重连。
+      } finally {
+        if (!cancelled) {
+          setEventsConnected(false);
+          retry = Math.min(retry + 1, 4);
+          const delay = [1000, 2000, 5000, 10_000, 10_000][retry] ?? 10_000;
+          retryTimer = setTimeout(() => void connect(), delay);
+        }
+      }
+    };
+
+    void connect();
+
+    return () => {
+      cancelled = true;
+      if (retryTimer) {
+        clearTimeout(retryTimer);
+      }
+      void reader?.cancel().catch(() => {});
+    };
+  }, [clientId]);
+
+  // 上报"当前打开的会话页"：仅当对端也在看同一 session 时服务端才推送该会话消息。
+  useEffect(() => {
+    const sessionId = activeSessionIsDraft ? null : activeSessionId || null;
+    void postActiveSession(clientId, sessionId);
+    return () => {
+      void postActiveSession(clientId, null);
+    };
+  }, [clientId, activeSessionId, activeSessionIsDraft]);
+
 
   const filteredSessions = useMemo(() => {
     // 草稿会话（尚未发送首条消息）不进入左侧历史列表，仅作为当前活动会话展示。
@@ -1379,6 +1692,7 @@ function ChatApp({
         },
         body: JSON.stringify({
           sessionId: targetSessionId,
+          clientId,
           model: selectedModel,
           client: buildClientContext(
             localToolSnapshot && localToolWorkspace
@@ -1504,6 +1818,41 @@ function ChatApp({
             }));
             break;
           }
+          case "approval-request": {
+            // 桌面弹窗来自 WS 通道；SSE 侧只把工具卡片标记为等待审批。
+            ensureAssistantMessage();
+            updateMessage(targetSessionId, assistantMessageId, (message) => ({
+              ...message,
+              toolCalls: (message.toolCalls ?? []).map((toolCall) =>
+                toolCall.id === event.eventId
+                  ? { ...toolCall, status: "awaiting-approval" }
+                  : toolCall,
+              ),
+            }));
+            break;
+          }
+          case "approval-resolved": {
+            // 批准 -> 回到 running 等待 tool-result；拒绝/超时 -> 标记失败。
+            ensureAssistantMessage();
+            updateMessage(targetSessionId, assistantMessageId, (message) => ({
+              ...message,
+              toolCalls: (message.toolCalls ?? []).map((toolCall) =>
+                toolCall.id === event.eventId &&
+                toolCall.status === "awaiting-approval"
+                  ? {
+                      ...toolCall,
+                      status:
+                        event.decision === "approved" ? "running" : "failed",
+                      error:
+                        event.decision === "approved"
+                          ? toolCall.error
+                          : `审批未通过（${event.decidedBy ?? "rejected"}）`,
+                    }
+                  : toolCall,
+              ),
+            }));
+            break;
+          }
           case "done": {
             ensureAssistantMessage();
             const finalText = event.parts?.find(
@@ -1614,10 +1963,15 @@ function ChatApp({
   }
 
   function resolveApproval(approved: boolean) {
-    setApprovalPrompt((current) => {
-      current?.resolve(approved);
-      return null;
-    });
+    const prompt = approvalPrompt;
+    if (prompt) {
+      localToolBridgeRef.current?.sendApprovalDecision(
+        prompt.approvalId,
+        approved ? "approved" : "rejected",
+      );
+    }
+    // 乐观关闭；服务端广播的 approval.resolved 也会兜底关闭。
+    setApprovalPrompt(null);
   }
 
   // 工作区 <select> 当前取值：空工作区 -> EMPTY，预设 -> workspaceId，自定义 -> "custom"。
@@ -1672,23 +2026,12 @@ function ChatApp({
     }
   }
 
-  const approvalCommand = approvalDetail(approvalPrompt, "Command");
-  const approvalWorkspace = approvalDetail(approvalPrompt, "Workspace");
-  const approvalCwd = approvalDetail(approvalPrompt, "Working directory");
+  const approvalCommand = approvalArg(approvalPrompt, "command");
+  const approvalCwd = approvalArg(approvalPrompt, "cwd");
   const isCommandApproval = Boolean(
     approvalPrompt?.toolName === "workspace.run_command" && approvalCommand,
   );
-  const approvalDetails = approvalPrompt
-    ? approvalPrompt.details.filter((detail) => {
-        if (!isCommandApproval) {
-          return true;
-        }
-
-        return !["Command", "Workspace", "Working directory"].includes(
-          detail.label,
-        );
-      })
-    : [];
+  const approvalDetails = approvalPrompt ? approvalPrompt.details : [];
 
   return (
     <main className="app-layout">
@@ -2272,7 +2615,7 @@ function ChatApp({
                 <h2 id="approval-title">
                   {isCommandApproval
                     ? "Allow Muse to run this command?"
-                    : approvalPrompt.title}
+                    : `Allow Muse to run ${approvalPrompt.toolName}?`}
                 </h2>
               </div>
               {isCommandApproval ? (
@@ -2293,10 +2636,7 @@ function ChatApp({
                 <dl className="command-approval-meta">
                   <div>
                     <dt>Workspace</dt>
-                    <dd>
-                      {approvalWorkspace ??
-                        approvalPrompt.workspace.displayName}
-                    </dd>
+                    <dd>{approvalPrompt.workspaceId}</dd>
                   </div>
                   <div>
                     <dt>Working Directory</dt>
