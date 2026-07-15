@@ -7,6 +7,8 @@ import {
   LogOut,
   MessageSquare,
   MonitorSmartphone,
+  MoreHorizontal,
+  Pencil,
   Plus,
   RefreshCw,
   SendHorizontal,
@@ -223,6 +225,28 @@ async function deleteSessionRequest(sessionId: string): Promise<void> {
   if (!response.ok) {
     throw new Error(`删除会话失败（${response.status}）`);
   }
+}
+
+async function renameSessionRequest(
+  sessionId: string,
+  title: string,
+): Promise<ServerSession> {
+  const response = await fetch(
+    `${resolveServerUrl()}/api/sessions/${encodeURIComponent(sessionId)}`,
+    {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+        ...authHeaders(),
+      },
+      body: JSON.stringify({ title }),
+    },
+  );
+  if (!response.ok) {
+    throw new Error(`重命名会话失败（${response.status}）`);
+  }
+  const data = (await response.json()) as { session: ServerSession };
+  return data.session;
 }
 
 function sessionFromServer(
@@ -606,6 +630,14 @@ function ChatApp({
   const [drawer, setDrawer] = useState<"none" | "sessions" | "remote">("none");
   // 联网检索开关：用户在 composer 点击 Search 时切换，仅对本客户端生效。
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
+  // 顶栏右侧「⋯」下拉菜单开合。
+  const [menuOpen, setMenuOpen] = useState(false);
+  // 正在重命名的会话（null 表示未打开重命名弹窗）。
+  const [renameTarget, setRenameTarget] = useState<Session | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
+  const [renamingSessionId, setRenamingSessionId] = useState<string | null>(
+    null,
+  );
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const conversationRef = useRef<HTMLDivElement | null>(null);
   const composerComposingRef = useRef(false);
@@ -860,6 +892,62 @@ function ChatApp({
       setNotice(error instanceof Error ? error.message : "删除会话失败");
     } finally {
       setDeletingSessionId(null);
+    }
+  }
+
+  // 打开当前会话的重命名弹窗（草稿会话也可改本地标题）。
+  function openRenameDialog() {
+    setMenuOpen(false);
+    if (!activeSession) {
+      return;
+    }
+    setRenameTarget(activeSession);
+    setRenameDraft(activeSession.title);
+  }
+
+  async function confirmRenameSession() {
+    const session = renameTarget;
+    if (!session) {
+      return;
+    }
+    const title = renameDraft.replace(/\s+/g, " ").trim();
+    if (!title) {
+      setNotice("会话标题不能为空。");
+      return;
+    }
+    if (title === session.title) {
+      setRenameTarget(null);
+      return;
+    }
+
+    setRenamingSessionId(session.id);
+    setNotice("");
+    try {
+      if (session.isDraft) {
+        setSessions((current) =>
+          current.map((item) =>
+            item.id === session.id ? { ...item, title } : item,
+          ),
+        );
+      } else {
+        const renamed = await renameSessionRequest(session.id, title);
+        setSessions((current) =>
+          current.map((item) =>
+            item.id === session.id
+              ? {
+                  ...item,
+                  title: renamed.title,
+                  updatedAt: formatTime(renamed.updatedAt),
+                }
+              : item,
+          ),
+        );
+      }
+      setRenameTarget(null);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "重命名会话失败");
+    } finally {
+      setRenamingSessionId(null);
     }
   }
 
@@ -1179,15 +1267,82 @@ function ChatApp({
           <span>{activeSession?.title ?? "新对话"}</span>
         </div>
 
-        <button
-          className="m-icon-button"
-          onClick={startNewSession}
-          title="新对话"
-          type="button"
-        >
-          <Plus aria-hidden="true" size={20} strokeWidth={2.2} />
-          <span className="sr-only">新对话</span>
-        </button>
+        <div className="m-topbar-right">
+          <button
+            className="m-icon-button"
+            onClick={startNewSession}
+            title="新对话"
+            type="button"
+          >
+            <Plus aria-hidden="true" size={20} strokeWidth={2.2} />
+            <span className="sr-only">新对话</span>
+          </button>
+
+          <div className="m-menu-wrap">
+            <button
+              className={`m-icon-button ${menuOpen ? "active" : ""}`}
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              onClick={() => setMenuOpen((value) => !value)}
+              title="更多"
+              type="button"
+            >
+              <MoreHorizontal aria-hidden="true" size={20} strokeWidth={2.1} />
+              <span className="sr-only">更多</span>
+            </button>
+
+            {menuOpen ? (
+              <>
+                <div
+                  className="m-menu-backdrop"
+                  onClick={() => setMenuOpen(false)}
+                  role="presentation"
+                />
+                <div className="m-menu" role="menu">
+                  <button
+                    className="m-menu-item"
+                    onClick={openRenameDialog}
+                    role="menuitem"
+                    type="button"
+                  >
+                    <Pencil aria-hidden="true" size={16} strokeWidth={2.1} />
+                    <span>重命名</span>
+                  </button>
+                  <button
+                    className="m-menu-item danger"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      if (activeSession) {
+                        requestDeleteSession(activeSession);
+                      }
+                    }}
+                    role="menuitem"
+                    type="button"
+                  >
+                    <Trash2 aria-hidden="true" size={16} strokeWidth={2.1} />
+                    <span>删除</span>
+                  </button>
+                  <button
+                    className={`m-menu-item ${remote.selection ? "active" : ""}`}
+                    onClick={() => {
+                      setMenuOpen(false);
+                      setDrawer("remote");
+                    }}
+                    role="menuitem"
+                    type="button"
+                  >
+                    <MonitorSmartphone
+                      aria-hidden="true"
+                      size={16}
+                      strokeWidth={2.1}
+                    />
+                    <span>{remote.selection ? "桌面已连接" : "连接桌面端"}</span>
+                  </button>
+                </div>
+              </>
+            ) : null}
+          </div>
+        </div>
       </header>
 
       <section className="m-canvas" aria-label="Chat">
@@ -1258,53 +1413,37 @@ function ChatApp({
             />
 
             <div className="m-composer-footer">
-              <div className="m-composer-tools">
-                <button
-                  className={`m-chip ${webSearchEnabled ? "active" : ""}`}
-                  aria-pressed={webSearchEnabled}
-                  onClick={() => setWebSearchEnabled((value) => !value)}
-                  title={webSearchEnabled ? "联网检索已开启" : "开启联网检索"}
-                  type="button"
-                >
-                  <Globe2 aria-hidden="true" size={16} strokeWidth={2.1} />
-                  <span>联网</span>
-                </button>
+              <button
+                className={`m-chip ${webSearchEnabled ? "active" : ""}`}
+                aria-pressed={webSearchEnabled}
+                onClick={() => setWebSearchEnabled((value) => !value)}
+                title={webSearchEnabled ? "联网检索已开启" : "开启联网检索"}
+                type="button"
+              >
+                <Globe2 aria-hidden="true" size={16} strokeWidth={2.1} />
+                <span>联网</span>
+              </button>
 
-                <button
-                  className={`m-chip ${remote.selection ? "active" : ""}`}
-                  onClick={() => setDrawer("remote")}
-                  title="连接桌面端"
-                  type="button"
+              <label className="m-model-select">
+                <Sparkles aria-hidden="true" size={15} strokeWidth={2.2} />
+                <select
+                  aria-label="Model"
+                  disabled={isBootstrapping || !models.length}
+                  onChange={(event) => updateActiveModel(event.target.value)}
+                  value={selectedModel ? modelKey(selectedModel) : ""}
                 >
-                  <MonitorSmartphone
-                    aria-hidden="true"
-                    size={16}
-                    strokeWidth={2.1}
-                  />
-                  <span>{remote.selection ? "桌面已连" : "桌面"}</span>
-                </button>
-
-                <label className="m-model-select">
-                  <Sparkles aria-hidden="true" size={15} strokeWidth={2.2} />
-                  <select
-                    aria-label="Model"
-                    disabled={isBootstrapping || !models.length}
-                    onChange={(event) => updateActiveModel(event.target.value)}
-                    value={selectedModel ? modelKey(selectedModel) : ""}
-                  >
-                    {models.length ? null : (
-                      <option value="">
-                        {isBootstrapping ? "加载模型中" : "无可用模型"}
-                      </option>
-                    )}
-                    {models.map((model) => (
-                      <option key={modelKey(model)} value={modelKey(model)}>
-                        {modelLabel(model)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
+                  {models.length ? null : (
+                    <option value="">
+                      {isBootstrapping ? "加载模型中" : "无可用模型"}
+                    </option>
+                  )}
+                  {models.map((model) => (
+                    <option key={modelKey(model)} value={modelKey(model)}>
+                      {modelLabel(model)}
+                    </option>
+                  ))}
+                </select>
+              </label>
 
               <button
                 className="send-button"
@@ -1406,6 +1545,57 @@ function ChatApp({
                 type="button"
               >
                 删除
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {renameTarget ? (
+        <div
+          aria-labelledby="rename-session-title"
+          aria-modal="true"
+          className="approval-backdrop"
+          role="dialog"
+        >
+          <section className="approval-dialog">
+            <div className="approval-header">
+              <div>
+                <span>重命名会话</span>
+                <h2 id="rename-session-title">{renameTarget.title}</h2>
+              </div>
+              <Pencil aria-hidden="true" size={22} strokeWidth={2.1} />
+            </div>
+            <input
+              className="m-rename-input"
+              aria-label="会话标题"
+              autoFocus
+              disabled={renamingSessionId === renameTarget.id}
+              onChange={(event) => setRenameDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+                  event.preventDefault();
+                  void confirmRenameSession();
+                }
+              }}
+              placeholder="输入会话标题"
+              value={renameDraft}
+            />
+            <div className="approval-actions">
+              <button
+                className="approval-button secondary"
+                onClick={() => setRenameTarget(null)}
+                type="button"
+              >
+                取消
+              </button>
+              <button
+                className="approval-button primary"
+                disabled={renamingSessionId === renameTarget.id}
+                onClick={() => void confirmRenameSession()}
+                type="button"
+              >
+                保存
               </button>
             </div>
           </section>

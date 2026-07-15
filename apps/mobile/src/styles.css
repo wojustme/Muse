@@ -114,8 +114,10 @@ button {
 }
 
 .m-topbar {
+  position: relative;
+  z-index: 20;
   display: grid;
-  grid-template-columns: 40px minmax(0, 1fr) 40px;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
   padding: calc(var(--safe-top) + 8px) calc(var(--safe-right) + 12px) 8px
@@ -155,6 +157,104 @@ button {
 
 .m-icon-button:active {
   background: rgb(74 58 20 / 8%);
+}
+
+.m-icon-button.active {
+  color: var(--accent);
+  background: var(--accent-tint);
+}
+
+.m-topbar-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* 顶栏「⋯」下拉菜单 */
+.m-menu-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.m-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+}
+
+.m-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 41;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 160px;
+  padding: 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 14px;
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-float);
+  animation: fade-in 0.14s ease;
+}
+
+.m-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 40px;
+  padding: 0 12px;
+  border-radius: 10px;
+  color: var(--text);
+  background: transparent;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.m-menu-item:active {
+  background: rgb(74 58 20 / 8%);
+}
+
+.m-menu-item.active {
+  color: var(--accent);
+}
+
+.m-menu-item.active svg {
+  color: var(--accent);
+}
+
+.m-menu-item.danger {
+  color: var(--danger);
+}
+
+.m-menu-item.danger svg {
+  color: var(--danger);
+}
+
+/* 重命名弹窗输入框 */
+.m-rename-input {
+  width: 100%;
+  height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  color: var(--text);
+  background: var(--bg-surface);
+  font-size: 16px;
+  outline: none;
+}
+
+.m-rename-input:focus {
+  border-color: var(--accent-line);
+  box-shadow: var(--focus-ring);
+}
+
+.approval-button.primary {
+  color: #fff;
+  background: var(--accent-gradient);
 }
 
 .m-canvas {
@@ -575,15 +675,6 @@ button {
   gap: 8px;
 }
 
-.m-composer-tools {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  overflow-x: auto;
-  flex: 1;
-}
-
 .m-chip {
   display: inline-flex;
   flex: 0 0 auto;
@@ -608,22 +699,25 @@ button {
 
 .m-model-select {
   display: inline-flex;
-  flex: 0 0 auto;
+  flex: 1;
+  min-width: 0;
   align-items: center;
   gap: 5px;
-  height: 34px;
-  padding: 0 8px;
+  height: 40px;
+  padding: 0 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius-pill);
   color: var(--text-muted);
 }
 
 .m-model-select select {
-  max-width: 130px;
+  flex: 1;
+  min-width: 0;
+  width: 100%;
   border: 0;
   color: var(--text);
   background: transparent;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 640;
   outline: none;
 }
