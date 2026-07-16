@@ -24,7 +24,7 @@ const envSchema = z.object({
   SESSION_TOKEN_TTL_HOURS: z.coerce.number().int().positive().default(720),
   LOGIN_CHALLENGE_TTL_SECONDS: z.coerce.number().int().positive().default(300),
 
-  // 本地开发免 OAuth 登录。只用于 Web/Tauri 前端联调，仍签发真实 session。
+  // 本地开发免 OAuth 登录。只用于 Tauri 客户端联调，仍签发真实 session。
   AUTH_DEV_MOCK: z
     .enum(["true", "false", "1", "0"])
     .optional()

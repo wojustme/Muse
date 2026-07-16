@@ -23,8 +23,8 @@ const canUseDevLogin = import.meta.env.DEV;
 type Phase = "idle" | "ready" | "waiting" | "error";
 
 // 移动端飞书登录页。
-// 与 Web 端的差异：不使用 window.open + postMessage（WKWebView 内不适用），
-// 改为用系统外部浏览器完成授权，App 侧持续轮询 challenge 状态直到拿到 token。
+// WKWebView 不使用 window.open + postMessage，改为用系统外部浏览器完成授权，
+// App 侧持续轮询 challenge 状态直到拿到 token。
 // 额外提供服务端地址输入框——真机无法访问桌面开发机的 127.0.0.1。
 export function LoginScreen({
   onAuthenticated,

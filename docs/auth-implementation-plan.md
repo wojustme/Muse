@@ -8,7 +8,7 @@
 2. 复用并补充 `database-design.md` 中的 `users` / `auth_identities` / `auth_sessions` / `user_devices`；
 3. 新增扫码登录所需的 `login_challenges` 表；
 4. 定义服务端的 provider 适配层与传输层抽象；
-5. 给出全端（macOS / Web / iOS / Windows / Android）的登录传输矩阵；
+5. 给出全端（macOS / iOS / Windows / Android）的登录传输矩阵；
 6. 给出接入顺序与分阶段落地计划。
 
 ## 1. 目标与非目标
@@ -17,7 +17,7 @@
 
 - 支持第三方登录，接入顺序：**飞书 → 钉钉 → 微信 → 支付宝**。
 - 一个 Muse 账号可以绑定多个第三方身份（绑定模型，而非"一登录一账号"）。
-- 同一套身份模型覆盖 macOS / Web / iOS / Windows / Android 五端。
+- 同一套身份模型覆盖 macOS / iOS / Windows / Android。
 - 登录态可按设备管理，可主动登出/吊销单个设备。
 
 非目标（本阶段不做）：
@@ -240,8 +240,6 @@ iOS / Android        原生 SDK 拉起 App 授权       SDK 回调 / Universal L
    （加超时；state 一次性；防重放）
 ```
 
-Web 端不经过步骤 5：`redirect_uri` 直接回 Web 页，服务端在回调里种 Cookie 后 302 回前端路由。
-
 ## 8. API 一览
 
 在 `database-design.md` 第 7 节接口基础上细化 auth 部分：
@@ -250,7 +248,6 @@ Web 端不经过步骤 5：`redirect_uri` 直接回 Web 页，服务端在回调
 POST   /api/auth/{provider}/challenge   发起扫码/授权，建 login_challenges，返回 authUrl（Desktop/Mobile）
 GET    /api/auth/{provider}/callback    provider 回调：换 token、判定、签发 session、回填 challenge
 GET    /api/auth/challenge/status       客户端轮询扫码结果（Desktop/Mobile）
-GET    /api/auth/{provider}/redirect    Web 端发起重定向登录
 POST   /api/auth/link/{provider}        已登录态下绑定新 provider（走同一 challenge/callback，携带当前 token）
 GET    /api/auth/me                     当前用户 + 已绑定身份列表（聚合视图）
 GET    /api/auth/identities             已绑定登录方式列表（设置页）
@@ -348,11 +345,7 @@ P1a  飞书 × macOS 桌面
      - 桌面端登录页（展示二维码 + 轮询）+ token 存储 + 请求携带 token
      - 全部身份模型与绑定流程在此阶段一次搭好
 
-P1b  飞书 × Web
-     - 新增"重定向"传输分支 + Cookie 种 token
-     - 验证 provider 抽象与传输抽象是否解耦干净
-
-P2   钉钉（× Desktop / Web 复用）
+P2   钉钉（× Desktop / Mobile 复用）
      - 只新增钉钉适配器 + provider 枚举值，不动表结构与绑定流程
 
 P3   微信（需企业资质）

@@ -4,9 +4,8 @@
 
 ## 1. 背景与结论
 
-Muse 现有两个客户端：
+Muse 当时已有桌面客户端：
 
-- `apps/web`：浏览器 Web 端，纯云端，用 `fetch` + SSE + localStorage。
 - `apps/desktop`：Tauri macOS 端，额外带本地工具桥 `LocalToolBridge`，可在已绑定 workspace 内执行文件/命令类工具。
 
 需求是新增手机端，本期做 iOS、后期加 Android，具体诉求：
@@ -27,7 +26,7 @@ Muse 现有两个客户端：
 
 ## 2. 技术选型
 
-- 技术栈：**Tauri v2 + 复用现有 React 聊天 UI**，以 `apps/web` 为 fork 基线（web 无 Tauri 本地桥，最贴近手机端"纯云端 + 借用桌面"形态）。
+- 技术栈：**Tauri v2 + React 聊天 UI**。移动端保留纯云端对话，并支持借用桌面本地工具。
 - 目录形态：**`apps/mobile` 规划为一个跨平台移动 app**，iOS/Android 共用同一份前端与同一个 `src-tauri`，用 `tauri ios init` / `tauri android init` 分别生成 `gen/apple` / `gen/android` 出包。不为两个平台建两个目录。
 - 平台差异收敛点：仅 `src/platform/` 与 `src-tauri/gen/`；业务与 UI 代码零分叉。
 
@@ -97,7 +96,7 @@ apps/mobile/
 
 ### 4.6 移动端 `App.tsx` + `styles.css`
 
-- 从 `apps/web/src/App.tsx` fork，改**单列移动布局**（去掉多栏 grid、traffic lights、context-panel），保留：
+- 使用**单列移动布局**（去掉多栏 grid、traffic lights、context-panel），保留：
   - SSE 打字机消费 `consumeChatStream`、Markdown 渲染、模型选择、会话列表/历史/删除/重命名、`buildClientContext`。
   - WebSearch 开关（对齐 desktop：`webSearchEnabled` 状态 + composer 里的 Search 按钮，请求带 `webSearch`）。
   - 远程设备选择器入口与 `localTools`/`localToolsHost` 拼装（对齐 desktop 的请求体组织）。
@@ -117,7 +116,7 @@ apps/mobile/
 ## 5. 复用的现有实现
 
 - `packages/api-client/src/index.ts`：登录/token/轮询全复用，仅传运行时 `platform` 与可配 `serverUrl`。
-- `apps/web/src/App.tsx`：SSE 消费 + Markdown + 会话逻辑作 fork 基线。
+- `apps/mobile/src/App.tsx`：SSE 消费、Markdown、会话逻辑和移动端布局。
 - `apps/desktop/src/App.tsx`：`webSearch` / `localTools` / `client.localToolsHost` 请求组织方式对齐。
 - 服务端 `chat.ts`、`local-tool-broker.ts`、`local-tools.ts`、`device-registry.ts`、`auth.ts` **全部不改**。
 

@@ -9,7 +9,6 @@
     "dev:desktop": "node scripts/muse-dev-desktop.mjs",
     "dev:desktop:web": "pnpm --filter @muse/desktop run dev:web",
     "dev:desktop:tauri": "pnpm --filter @muse/desktop run dev:tauri",
-    "dev:web": "pnpm --filter @muse/web run dev",
     "dev:mobile:web": "pnpm --filter @muse/mobile run dev:web",
     "dev:mobile:ios": "pnpm --filter @muse/mobile run dev:ios",
     "dev:mobile:android": "pnpm --filter @muse/mobile run dev:android",

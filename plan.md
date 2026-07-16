@@ -146,7 +146,6 @@ Tauri Native Layer
 Muse/
   apps/
     desktop/            Tauri 桌面客户端，macOS + Windows 共用
-    web/                浏览器 Web 客户端
     server/             Node.js 后端服务
     mobile/             未来移动端，iOS + Android 共用
     miniapp/            未来微信小程序客户端
@@ -186,7 +185,6 @@ packages/
 目录边界：
 
 - `apps/desktop`: 用户可见的桌面客户端，包含 React 前端和 Tauri Rust native 层。
-- `apps/web`: 浏览器 Web 客户端，复用桌面端的大部分 React UI 和 API client，平台差异集中在登录跳转、浏览器存储和后续 Web 路由。
 - `apps/server`: Node.js 后端，负责 Chat API、session 读写、模型调用、streaming、tool calling 和后续 agent runtime。
 - `apps/mobile`: 后续 iOS 和 Android 客户端入口，建议 React Native / Expo 起步，或继续评估 Tauri mobile。
 - `apps/miniapp`: 后续微信小程序客户端入口，可选 Taro + React + TypeScript，或原生小程序。

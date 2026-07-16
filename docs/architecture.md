@@ -5,7 +5,7 @@ Muse uses a pnpm workspace monorepo.
 ```txt
 apps/
   desktop/        Tauri desktop client for macOS and Windows
-  web/            Browser web client
+  mobile/         Tauri mobile client for iOS and Android
   server/         Node.js backend service
 
 packages/
@@ -18,6 +18,5 @@ Future clients can be added as:
 
 ```txt
 apps/
-  mobile/         iOS and Android client
   miniapp/        WeChat Mini Program client
 ```

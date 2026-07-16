@@ -271,7 +271,7 @@ LocalTools 的安全边界分三层：
 
 ## 9. 当前实现边界
 
-- macOS LocalTools 只在 Desktop/Tauri 端真正可执行；Web 端没有 Tauri command 能力。
+- macOS LocalTools 只在 Desktop/Tauri 端真正可执行；Mobile 只能远程借用在线 Desktop 的能力。
 - 默认 workspace 仍是代码里硬编码的 `/Users/bytedance/Downloads`，还不是用户可配置、多 workspace 管理形态。
 - `ServerBash` 和 macOS `Bash` 是两条不同执行边界：
   - `ServerBash` 在后端宿主机执行，默认关闭，由 `MUSE_LOCAL_BASH_ENABLED` 控制。
