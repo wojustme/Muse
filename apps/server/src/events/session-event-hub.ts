@@ -32,6 +32,29 @@ export type SessionEvent =
         lastMessagePreview?: string;
       };
       originClientId?: string;
+    }
+  // AI 开始生成：另一端据此建流式占位气泡。
+  | {
+      type: "message.stream-start";
+      sessionId: string;
+      messageId: string;
+      originClientId?: string;
+    }
+  // AI 生成增量：另一端逐字追加，与发起端同步流式。
+  | {
+      type: "message.stream-delta";
+      sessionId: string;
+      messageId: string;
+      text: string;
+      originClientId?: string;
+    }
+  // AI 定稿：另一端关闭流式态（随后 message.created 做最终对齐）。
+  | {
+      type: "message.stream-end";
+      sessionId: string;
+      messageId: string;
+      text: string;
+      originClientId?: string;
     };
 
 type ClientConnection = {
@@ -90,7 +113,7 @@ export class SessionEventHub {
   }
 
   // 向该用户所有连接广播事件，可跳过发起端（其自身已通过 /api/chat 流实时看到）。
-  // message.created 仅推给正在看该 session 的其他端；session.updated 广播给全部（列表可见）。
+  // 带 sessionId 的消息/流式事件仅推给正在看该 session 的其他端；session.updated 广播给全部（列表可见）。
   publish(
     userId: string,
     event: SessionEvent,
@@ -101,16 +124,20 @@ export class SessionEventHub {
       return;
     }
 
+    // 需按当前会话页过滤的事件类型（单条消息与流式增量）。
+    const sessionScoped =
+      event.type === "message.created" ||
+      event.type === "message.stream-start" ||
+      event.type === "message.stream-delta" ||
+      event.type === "message.stream-end";
+
     const payload = `data: ${JSON.stringify(event)}\n\n`;
     for (const [clientId, connection] of clients) {
       if (opts?.exceptClientId && clientId === opts.exceptClientId) {
         continue;
       }
-      // 单条消息只推给正在打开该会话页的端，避免推送对方当前看不到的内容。
-      if (
-        event.type === "message.created" &&
-        connection.activeSessionId !== event.sessionId
-      ) {
+      // 会话内事件只推给正在打开该会话页的端，避免推送对方当前看不到的内容。
+      if (sessionScoped && connection.activeSessionId !== event.sessionId) {
         continue;
       }
       if (connection.raw.writableEnded) {

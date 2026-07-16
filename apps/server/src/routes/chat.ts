@@ -598,6 +598,18 @@ export async function chatRoutes(app: FastifyInstance) {
       session: buildSessionPayload(now, previewFromText(prompt), 1),
     });
 
+    // 向正在看该 session 的其他端广播「AI 开始生成」，据此建流式占位气泡。
+    sessionEventHub.publish(
+      userId,
+      {
+        type: "message.stream-start",
+        sessionId,
+        messageId: assistantMessageId,
+        originClientId: parsed.data.clientId,
+      },
+      { exceptClientId: parsed.data.clientId },
+    );
+
     void (async () => {
       try {
         const result = streamText({
@@ -622,6 +634,18 @@ export async function chatRoutes(app: FastifyInstance) {
         for await (const delta of result.textStream) {
           if (delta) {
             writeSseEvent(raw, { type: "delta", text: delta });
+            // 同步把增量广播给正在看该 session 的其他端，实现另一端流式跟随。
+            sessionEventHub.publish(
+              userId,
+              {
+                type: "message.stream-delta",
+                sessionId,
+                messageId: assistantMessageId,
+                text: delta,
+                originClientId: parsed.data.clientId,
+              },
+              { exceptClientId: parsed.data.clientId },
+            );
           }
         }
 
@@ -634,6 +658,20 @@ export async function chatRoutes(app: FastifyInstance) {
         const completedAt = new Date();
         const assistantText = finalText.trim() || "模型返回了空响应。";
         const assistantParts = [{ type: "text", text: assistantText }];
+
+        // 广播「AI 定稿」，另一端据此关闭流式态（随后 message.created 做最终对齐）。
+        sessionEventHub.publish(
+          userId,
+          {
+            type: "message.stream-end",
+            sessionId,
+            messageId: assistantMessageId,
+            text: assistantText,
+            originClientId: parsed.data.clientId,
+          },
+          { exceptClientId: parsed.data.clientId },
+        );
+
         const persistedToolCalls = await persistToolCalls({
           steps,
           metadataByName: toolRegistry.metadataByName,

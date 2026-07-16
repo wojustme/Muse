@@ -917,6 +917,8 @@ function ChatApp({
     const applyEvent = (event: {
       type?: string;
       sessionId?: string;
+      messageId?: string;
+      text?: string;
       message?: Message;
       session?: {
         id: string;
@@ -949,6 +951,84 @@ function ChatApp({
               updatedAt: "Now",
             };
           }),
+        );
+      } else if (
+        event.type === "message.stream-start" &&
+        event.sessionId &&
+        event.messageId
+      ) {
+        // 对方端 AI 开始生成：建一个流式占位气泡（若尚不存在）。
+        const sessionId = event.sessionId;
+        const messageId = event.messageId;
+        setSessions((current) =>
+          current.map((session) => {
+            if (
+              session.id !== sessionId ||
+              session.messages.some((m) => m.id === messageId)
+            ) {
+              return session;
+            }
+            return {
+              ...session,
+              messagesLoaded: true,
+              messages: [
+                ...session.messages,
+                {
+                  id: messageId,
+                  role: "assistant" as const,
+                  text: "",
+                  streaming: true,
+                },
+              ],
+            };
+          }),
+        );
+      } else if (
+        event.type === "message.stream-delta" &&
+        event.sessionId &&
+        event.messageId
+      ) {
+        // 逐字追加对方端 AI 的增量。
+        const sessionId = event.sessionId;
+        const messageId = event.messageId;
+        const delta = event.text ?? "";
+        setSessions((current) =>
+          current.map((session) =>
+            session.id === sessionId
+              ? {
+                  ...session,
+                  messages: session.messages.map((m) =>
+                    m.id === messageId
+                      ? { ...m, text: m.text + delta, streaming: true }
+                      : m,
+                  ),
+                }
+              : session,
+          ),
+        );
+      } else if (
+        event.type === "message.stream-end" &&
+        event.sessionId &&
+        event.messageId
+      ) {
+        // 定稿：写入完整文本并关闭流式态。
+        const sessionId = event.sessionId;
+        const messageId = event.messageId;
+        const finalText = event.text ?? "";
+        setSessions((current) =>
+          current.map((session) =>
+            session.id === sessionId
+              ? {
+                  ...session,
+                  messages: session.messages.map((m) =>
+                    m.id === messageId
+                      ? { ...m, text: finalText || m.text, streaming: false }
+                      : m,
+                  ),
+                  preview: finalText || session.preview,
+                }
+              : session,
+          ),
         );
       } else if (event.type === "session.updated" && event.session) {
         const updated = event.session;

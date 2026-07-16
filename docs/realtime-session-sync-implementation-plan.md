@@ -39,6 +39,17 @@ Node.js Server
 - `session.updated`：`{ session: {id,title,updatedAt,lastMessagePreview,...}, originClientId }`——会话元信息变化（标题、预览、messageCount）。
 - `hello`/心跳：连接建立即发 `hello`；每 ~25s 发注释行心跳保活，避免中间层断连。
 
+### 流式转发（另一端逐字跟随 AI 回复）
+
+仅在落库节点推 `message.created` 会让另一端"等 AI 答完才整段出现"，无流式感。为让正在看同一 session 的另一端也逐字跟随，AI 生成过程中广播流式事件：
+
+- `message.stream-start`：`{ sessionId, messageId, originClientId }`——AI 开始生成，另一端据此建流式占位气泡。
+- `message.stream-delta`：`{ sessionId, messageId, text, originClientId }`——在服务端 `for await (delta)` 里，除写发起端 `/api/chat` 流外，同时 `publish` 该增量；另一端逐字追加。
+- `message.stream-end`：`{ sessionId, messageId, text, originClientId }`——定稿完整文本，另一端关闭流式态。落库后仍发 `message.created`/`session.updated` 做最终对齐。
+
+高频 delta 仅推给 `activeSessionId === sessionId` 的其他端（复用 §2.1 过滤），不看该会话的端不受影响。发起端自身通过 `/api/chat` 流已流式渲染，靠 `originClientId`/`exceptClientId` 跳过。
+
+
 去重：事件带 `originClientId`；发起端自己不重复应用（本地已乐观更新/流式渲染），仅其他端应用。服务端 `publish(userId, event, { exceptClientId })` 直接跳过发起端连接即可，客户端侧再兜底比对。
 
 ### 2.1 优化：仅当两端都在同一 session 页面时才实时同步
