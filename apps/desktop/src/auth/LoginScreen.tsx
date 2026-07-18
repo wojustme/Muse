@@ -12,7 +12,8 @@ import {
 } from "../auth/client";
 
 const POLL_INTERVAL_MS = 2000;
-const canUseDevLogin = import.meta.env.DEV;
+const canUseDevLogin =
+  import.meta.env.DEV || import.meta.env.VITE_ENABLE_DEV_LOGIN === "true";
 
 // idle: 正在发起登录；ready: 可点击登录；waiting: 已拉起浏览器并轮询；error: 失败。
 type Phase = "idle" | "ready" | "waiting" | "error";

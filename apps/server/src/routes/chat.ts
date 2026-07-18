@@ -446,15 +446,26 @@ export async function chatRoutes(app: FastifyInstance) {
           return;
         }
         writeSseEvent(raw, event);
+        sessionEventHub.publish(
+          userId,
+          {
+            type: "tool-runtime",
+            sessionId,
+            messageId: assistantMessageId,
+            event,
+            originClientId: parsed.data.clientId,
+          },
+          { exceptClientId: parsed.data.clientId },
+        );
       },
     });
     const availableToolNames = Object.keys(toolRegistry.tools);
     const localToolsEnabled = Boolean(
       parsed.data.localTools?.deviceId &&
-        parsed.data.localTools?.workspaceId &&
-        ["Read", "Grep", "LS", "Write", "Edit", "Bash"].some((toolName) =>
-          availableToolNames.includes(toolName),
-        ),
+      parsed.data.localTools?.workspaceId &&
+      ["Read", "Grep", "LS", "Write", "Edit", "Bash"].some((toolName) =>
+        availableToolNames.includes(toolName),
+      ),
     );
     const systemPrompt = buildLocalToolSystemPrompt({
       localToolsEnabled,

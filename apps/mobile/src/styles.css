@@ -129,19 +129,64 @@ button {
 
 .m-topbar-title {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 3px;
   min-width: 0;
   font-size: 15px;
   font-weight: 760;
   color: var(--text);
 }
 
-.m-topbar-title span {
+.m-topbar-session-title {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.m-topbar-session-title span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.m-remote-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 2px 7px;
+  border: 1px solid rgb(61 154 92 / 22%);
+  border-radius: var(--radius-pill);
+  color: #357d4d;
+  background: rgb(61 154 92 / 9%);
+  font-size: 10px;
+  font-weight: 720;
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.m-remote-status:active {
+  background: rgb(61 154 92 / 16%);
+}
+
+.m-remote-status svg {
+  flex: 0 0 auto;
+}
+
+.m-remote-status-dot {
+  width: 5px;
+  height: 5px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 0 2px rgb(61 154 92 / 13%);
 }
 
 .m-icon-button {

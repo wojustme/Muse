@@ -12,6 +12,17 @@ const eventsQuerySchema = z.object({
 const activeSessionSchema = z.object({
   clientId: z.string().min(1).max(128),
   sessionId: z.string().min(1).nullable(),
+  clientKind: z.enum(["desktop", "mobile", "unknown"]).optional(),
+  clientLabel: z.string().min(1).max(128).optional(),
+  remoteTarget: z
+    .object({
+      deviceId: z.string().min(1).max(128),
+      workspaceId: z.string().min(1).max(128),
+      deviceName: z.string().min(1).max(128).optional(),
+      workspaceName: z.string().min(1).max(128).optional(),
+    })
+    .nullable()
+    .optional(),
 });
 
 // 按用户的会话事件 SSE 长连接。客户端登录后建立，用于接收跨端消息推送。
@@ -62,11 +73,14 @@ export async function eventsRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: "Invalid active session" });
       }
       const userId = request.userId as string;
-      sessionEventHub.setActiveSession(
+      sessionEventHub.setActiveSession({
         userId,
-        parsed.data.clientId,
-        parsed.data.sessionId,
-      );
+        clientId: parsed.data.clientId,
+        sessionId: parsed.data.sessionId,
+        clientKind: parsed.data.clientKind,
+        clientLabel: parsed.data.clientLabel,
+        remoteTarget: parsed.data.remoteTarget,
+      });
       return reply.send({ ok: true });
     },
   );

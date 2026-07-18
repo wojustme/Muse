@@ -73,8 +73,12 @@ export function eventsUrl(clientId: string) {
   return client().eventsUrl(clientId);
 }
 
-export function postActiveSession(clientId: string, sessionId: string | null) {
-  return client().postActiveSession(clientId, sessionId);
+export function postActiveSession(
+  clientId: string,
+  sessionId: string | null,
+  presence?: Parameters<MuseApiClient["postActiveSession"]>[2],
+) {
+  return client().postActiveSession(clientId, sessionId, presence);
 }
 
 export type { ChallengeResult } from "@muse/api-client";

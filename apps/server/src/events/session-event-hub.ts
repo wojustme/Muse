@@ -1,4 +1,5 @@
 import type { ServerResponse } from "node:http";
+import type { MuseToolRuntimeEvent } from "../agent/types.js";
 
 // 按用户的会话事件广播中心。
 //
@@ -55,12 +56,46 @@ export type SessionEvent =
       messageId: string;
       text: string;
       originClientId?: string;
+    }
+  // 工具运行态：另一端把工具卡片挂到同一条 assistant 消息下。
+  | {
+      type: "tool-runtime";
+      sessionId: string;
+      messageId: string;
+      event: MuseToolRuntimeEvent;
+      originClientId?: string;
+    }
+  // 当前会话的跨端连接状态：用于桌面展示哪些移动端正在借用本机工具。
+  | {
+      type: "session.presence";
+      sessionId: string;
+      connections: SessionPresenceConnection[];
+      originClientId?: string;
     };
+
+export type ClientKind = "desktop" | "mobile" | "unknown";
+
+export type RemoteToolTarget = {
+  deviceId: string;
+  workspaceId: string;
+  deviceName?: string;
+  workspaceName?: string;
+};
+
+export type SessionPresenceConnection = {
+  clientId: string;
+  clientKind: ClientKind;
+  clientLabel: string;
+  remoteTarget?: RemoteToolTarget;
+};
 
 type ClientConnection = {
   raw: ServerResponse;
   // 该连接当前打开的会话页；null 表示不在任何会话页（如历史列表）。
   activeSessionId: string | null;
+  clientKind: ClientKind;
+  clientLabel: string;
+  remoteTarget: RemoteToolTarget | null;
 };
 
 type ClientConnections = Map<string, ClientConnection>;
@@ -84,7 +119,13 @@ export class SessionEventHub {
         // 旧连接可能已断开，忽略。
       }
     }
-    clients.set(clientId, { raw, activeSessionId: null });
+    clients.set(clientId, {
+      raw,
+      activeSessionId: null,
+      clientKind: "unknown",
+      clientLabel: "Muse Client",
+      remoteTarget: null,
+    });
 
     return () => {
       const current = this.connectionsByUser.get(userId);
@@ -101,15 +142,73 @@ export class SessionEventHub {
   }
 
   // 客户端上报"当前打开的会话页"。sessionId 为 null 表示离开会话页。
-  setActiveSession(
-    userId: string,
-    clientId: string,
-    sessionId: string | null,
-  ): void {
+  setActiveSession(input: {
+    userId: string;
+    clientId: string;
+    sessionId: string | null;
+    clientKind?: ClientKind;
+    clientLabel?: string;
+    remoteTarget?: RemoteToolTarget | null;
+  }): void {
+    const {
+      userId,
+      clientId,
+      sessionId,
+      clientKind,
+      clientLabel,
+      remoteTarget,
+    } = input;
     const connection = this.connectionsByUser.get(userId)?.get(clientId);
     if (connection) {
+      const previousSessionId = connection.activeSessionId;
       connection.activeSessionId = sessionId;
+      connection.clientKind = clientKind ?? connection.clientKind;
+      connection.clientLabel = clientLabel ?? connection.clientLabel;
+      connection.remoteTarget = remoteTarget ?? null;
+      if (previousSessionId && previousSessionId !== sessionId) {
+        this.publishPresence(userId, previousSessionId, clientId);
+      }
+      this.publishPresence(userId, sessionId, clientId);
+      return;
     }
+    this.publishPresence(userId, sessionId, clientId);
+  }
+
+  private presenceForSession(
+    userId: string,
+    sessionId: string | null,
+  ): SessionPresenceConnection[] {
+    if (!sessionId) {
+      return [];
+    }
+    const clients = this.connectionsByUser.get(userId);
+    if (!clients) {
+      return [];
+    }
+    return [...clients.entries()]
+      .filter(([, connection]) => connection.activeSessionId === sessionId)
+      .map(([clientId, connection]) => ({
+        clientId,
+        clientKind: connection.clientKind,
+        clientLabel: connection.clientLabel,
+        remoteTarget: connection.remoteTarget ?? undefined,
+      }));
+  }
+
+  private publishPresence(
+    userId: string,
+    sessionId: string | null,
+    originClientId?: string,
+  ): void {
+    if (!sessionId) {
+      return;
+    }
+    this.publish(userId, {
+      type: "session.presence",
+      sessionId,
+      connections: this.presenceForSession(userId, sessionId),
+      originClientId,
+    });
   }
 
   // 向该用户所有连接广播事件，可跳过发起端（其自身已通过 /api/chat 流实时看到）。
@@ -129,7 +228,9 @@ export class SessionEventHub {
       event.type === "message.created" ||
       event.type === "message.stream-start" ||
       event.type === "message.stream-delta" ||
-      event.type === "message.stream-end";
+      event.type === "message.stream-end" ||
+      event.type === "tool-runtime" ||
+      event.type === "session.presence";
 
     const payload = `data: ${JSON.stringify(event)}\n\n`;
     for (const [clientId, connection] of clients) {

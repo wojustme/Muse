@@ -517,6 +517,31 @@ function mergeServerMessages(local: Message[], server: Message[]): Message[] {
   return merged;
 }
 
+// message.created 是服务端最终落库事件；即使本地仍有同 id 的流式占位，也要收敛为最终消息。
+function upsertFinalServerMessage(
+  local: Message[],
+  incoming: Message,
+): Message[] {
+  let replaced = false;
+  const merged = local.map((message) => {
+    if (message.id !== incoming.id) {
+      return message;
+    }
+    replaced = true;
+    return {
+      ...incoming,
+      streaming: false,
+      toolCalls: message.toolCalls ?? incoming.toolCalls,
+    };
+  });
+
+  if (!replaced) {
+    merged.push({ ...incoming, streaming: false });
+  }
+
+  return merged;
+}
+
 // 判断两组消息是否等价（避免轮询无变化时触发无谓 re-render）。
 function sameMessages(a: Message[], b: Message[]): boolean {
   if (a.length !== b.length) {
@@ -586,6 +611,80 @@ type ChatStreamEvent =
       session?: ServerSession;
     }
   | { type: "error"; error?: string; message?: string };
+
+type ToolRuntimeStreamEvent = Extract<
+  ChatStreamEvent,
+  {
+    type:
+      "tool-start" | "tool-result" | "approval-request" | "approval-resolved";
+  }
+>;
+
+function applyToolRuntimeEventToMessage(
+  message: Message,
+  event: ToolRuntimeStreamEvent,
+): Message {
+  switch (event.type) {
+    case "tool-start":
+      return {
+        ...message,
+        toolCalls: [
+          ...(message.toolCalls ?? []).filter(
+            (toolCall) => toolCall.id !== event.id,
+          ),
+          {
+            id: event.id,
+            name: event.name,
+            source: event.source,
+            riskLevel: event.riskLevel,
+            requiresApproval: event.requiresApproval,
+            status: "running",
+            input: event.input,
+          },
+        ],
+      };
+    case "tool-result":
+      return {
+        ...message,
+        toolCalls: (message.toolCalls ?? []).map((toolCall) =>
+          toolCall.id === event.id
+            ? {
+                ...toolCall,
+                status: event.status,
+                output: event.output,
+                error: event.error,
+              }
+            : toolCall,
+        ),
+      };
+    case "approval-request":
+      return {
+        ...message,
+        toolCalls: (message.toolCalls ?? []).map((toolCall) =>
+          toolCall.id === event.eventId
+            ? { ...toolCall, status: "awaiting-approval" }
+            : toolCall,
+        ),
+      };
+    case "approval-resolved":
+      return {
+        ...message,
+        toolCalls: (message.toolCalls ?? []).map((toolCall) =>
+          toolCall.id === event.eventId &&
+          toolCall.status === "awaiting-approval"
+            ? {
+                ...toolCall,
+                status: event.decision === "approved" ? "running" : "failed",
+                error:
+                  event.decision === "approved"
+                    ? toolCall.error
+                    : `审批未通过（${event.decidedBy ?? "rejected"}）`,
+              }
+            : toolCall,
+        ),
+      };
+  }
+}
 
 // 读取 text/event-stream，按 `data: <json>` 逐条解析并回调，供打字机渲染使用。
 async function consumeChatStream(
@@ -920,6 +1019,7 @@ function ChatApp({
       messageId?: string;
       text?: string;
       message?: Message;
+      event?: ToolRuntimeStreamEvent;
       session?: {
         id: string;
         title?: string;
@@ -931,7 +1031,11 @@ function ChatApp({
       if (event.originClientId && event.originClientId === clientId) {
         return; // 自己发的，已在本地渲染。
       }
-      if (event.type === "message.created" && event.sessionId && event.message) {
+      if (
+        event.type === "message.created" &&
+        event.sessionId &&
+        event.message
+      ) {
         const incoming = event.message;
         const sessionId = event.sessionId;
         setSessions((current) =>
@@ -939,7 +1043,7 @@ function ChatApp({
             if (session.id !== sessionId) {
               return session;
             }
-            const merged = mergeServerMessages(session.messages, [incoming]);
+            const merged = upsertFinalServerMessage(session.messages, incoming);
             if (sameMessages(session.messages, merged)) {
               return session;
             }
@@ -1030,6 +1134,30 @@ function ChatApp({
               : session,
           ),
         );
+      } else if (
+        event.type === "tool-runtime" &&
+        event.sessionId &&
+        event.messageId &&
+        event.event
+      ) {
+        const sessionId = event.sessionId;
+        const messageId = event.messageId;
+        const toolEvent = event.event;
+        setSessions((current) =>
+          current.map((session) =>
+            session.id === sessionId
+              ? {
+                  ...session,
+                  messagesLoaded: true,
+                  messages: session.messages.map((message) =>
+                    message.id === messageId
+                      ? applyToolRuntimeEventToMessage(message, toolEvent)
+                      : message,
+                  ),
+                }
+              : session,
+          ),
+        );
       } else if (event.type === "session.updated" && event.session) {
         const updated = event.session;
         setSessions((current) =>
@@ -1115,13 +1243,27 @@ function ChatApp({
   // 切换会话 / 落到草稿 / 卸载都会重新上报。
   useEffect(() => {
     const sessionId = activeSessionIsDraft ? null : activeSessionId || null;
-    void postActiveSession(clientId, sessionId);
+    void postActiveSession(clientId, sessionId, {
+      clientKind: "mobile",
+      clientLabel: "Muse Mobile",
+      remoteTarget: remote.selection
+        ? {
+            deviceId: remote.selection.deviceId,
+            workspaceId: remote.selection.workspaceId,
+            deviceName: remote.selection.deviceName,
+            workspaceName: remote.selection.workspaceName,
+          }
+        : null,
+    });
     return () => {
       // 组件卸载（登出等）时上报离开会话页。
-      void postActiveSession(clientId, null);
+      void postActiveSession(clientId, null, {
+        clientKind: "mobile",
+        clientLabel: "Muse Mobile",
+        remoteTarget: null,
+      });
     };
-  }, [clientId, activeSessionId, activeSessionIsDraft]);
-
+  }, [clientId, activeSessionId, activeSessionIsDraft, remote.selection]);
 
   const persistedSessions = useMemo(
     () => sessions.filter((session) => !session.isDraft),
@@ -1597,7 +1739,8 @@ function ChatApp({
                 toolCall.status === "awaiting-approval"
                   ? {
                       ...toolCall,
-                      status: event.decision === "approved" ? "running" : "failed",
+                      status:
+                        event.decision === "approved" ? "running" : "failed",
                       error:
                         event.decision === "approved"
                           ? toolCall.error
@@ -1730,8 +1873,27 @@ function ChatApp({
         </button>
 
         <div className="m-topbar-title">
-          <MuseMark size={20} spark={false} />
-          <span>{activeSession?.title ?? "新对话"}</span>
+          <div className="m-topbar-session-title">
+            <MuseMark size={20} spark={false} />
+            <span>{activeSession?.title ?? "新对话"}</span>
+          </div>
+          {remote.selection ? (
+            <button
+              className="m-remote-status"
+              aria-label={`已连接桌面端：${remoteLabel}`}
+              onClick={() => setDrawer("remote")}
+              title={remoteLabel}
+              type="button"
+            >
+              <span className="m-remote-status-dot" aria-hidden="true" />
+              <MonitorSmartphone
+                aria-hidden="true"
+                size={11}
+                strokeWidth={2.3}
+              />
+              <span>桌面已连接</span>
+            </button>
+          ) : null}
         </div>
 
         <div className="m-topbar-right">
@@ -1803,7 +1965,9 @@ function ChatApp({
                       size={16}
                       strokeWidth={2.1}
                     />
-                    <span>{remote.selection ? "桌面已连接" : "连接桌面端"}</span>
+                    <span>
+                      {remote.selection ? "桌面已连接" : "连接桌面端"}
+                    </span>
                   </button>
                 </div>
               </>

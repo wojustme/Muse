@@ -87,12 +87,28 @@ export function createMuseApiClient(options: MuseApiClientOptions) {
   async function postActiveSession(
     clientId: string,
     sessionId: string | null,
+    presence?: {
+      clientKind?: "desktop" | "mobile";
+      clientLabel?: string;
+      remoteTarget?: {
+        deviceId: string;
+        workspaceId: string;
+        deviceName?: string;
+        workspaceName?: string;
+      } | null;
+    },
   ): Promise<void> {
     try {
       await fetch(`${options.serverUrl}/api/events/active`, {
         method: "POST",
         headers: { "content-type": "application/json", ...authHeaders() },
-        body: JSON.stringify({ clientId, sessionId }),
+        body: JSON.stringify({
+          clientId,
+          sessionId,
+          clientKind: presence?.clientKind,
+          clientLabel: presence?.clientLabel,
+          remoteTarget: presence?.remoteTarget,
+        }),
       });
     } catch {
       // 网络抖动时忽略，下次切换会话会再次上报。

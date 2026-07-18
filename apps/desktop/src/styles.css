@@ -794,6 +794,37 @@ button {
   white-space: nowrap;
 }
 
+.session-mobile-presence {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  width: fit-content;
+  max-width: 100%;
+  padding: 4px 9px;
+  border: 1px solid rgb(61 154 92 / 22%);
+  border-radius: var(--radius-pill);
+  color: #357d4d;
+  background: rgb(61 154 92 / 9%);
+  font-size: 12px;
+  font-weight: 720;
+  line-height: 1.2;
+}
+
+.session-mobile-presence span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.presence-dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 0 2px rgb(61 154 92 / 13%);
+}
+
 .model-select {
   position: relative;
   display: inline-flex;

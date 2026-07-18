@@ -131,6 +131,18 @@ type SystemInfo = {
   cpuBrand: string;
 };
 
+type SessionPresenceConnection = {
+  clientId: string;
+  clientKind: "desktop" | "mobile" | "unknown";
+  clientLabel: string;
+  remoteTarget?: {
+    deviceId: string;
+    workspaceId: string;
+    deviceName?: string;
+    workspaceName?: string;
+  };
+};
+
 const serverUrl = import.meta.env.VITE_SERVER_URL ?? "http://127.0.0.1:8787";
 
 // 工作区在 localStorage 中的持久化键；存 null 表示「空工作区」。
@@ -695,10 +707,7 @@ async function fetchSessionMessages(sessionId: string): Promise<{
 // - 服务端消息为权威内容（对方端发的会出现在这里）；
 // - 保留本地正在流式输出、或服务端尚未持久化的"在流"消息（按 id 不在服务端列表）；
 // - 对两端都有的消息，保留本地已附加的 toolCalls（服务端 /messages 不返回工具调用）。
-function mergeServerMessages(
-  local: Message[],
-  server: Message[],
-): Message[] {
+function mergeServerMessages(local: Message[], server: Message[]): Message[] {
   const localById = new Map(local.map((message) => [message.id, message]));
   const serverIds = new Set(server.map((message) => message.id));
 
@@ -722,6 +731,31 @@ function mergeServerMessages(
     if (!serverIds.has(message.id)) {
       merged.push(message);
     }
+  }
+
+  return merged;
+}
+
+// message.created 是服务端最终落库事件；即使本地仍有同 id 的流式占位，也要收敛为最终消息。
+function upsertFinalServerMessage(
+  local: Message[],
+  incoming: Message,
+): Message[] {
+  let replaced = false;
+  const merged = local.map((message) => {
+    if (message.id !== incoming.id) {
+      return message;
+    }
+    replaced = true;
+    return {
+      ...incoming,
+      streaming: false,
+      toolCalls: message.toolCalls ?? incoming.toolCalls,
+    };
+  });
+
+  if (!replaced) {
+    merged.push({ ...incoming, streaming: false });
   }
 
   return merged;
@@ -789,6 +823,80 @@ type ChatStreamEvent =
       session?: ServerSession;
     }
   | { type: "error"; error?: string; message?: string };
+
+type ToolRuntimeStreamEvent = Extract<
+  ChatStreamEvent,
+  {
+    type:
+      "tool-start" | "tool-result" | "approval-request" | "approval-resolved";
+  }
+>;
+
+function applyToolRuntimeEventToMessage(
+  message: Message,
+  event: ToolRuntimeStreamEvent,
+): Message {
+  switch (event.type) {
+    case "tool-start":
+      return {
+        ...message,
+        toolCalls: [
+          ...(message.toolCalls ?? []).filter(
+            (toolCall) => toolCall.id !== event.id,
+          ),
+          {
+            id: event.id,
+            name: event.name,
+            source: event.source,
+            riskLevel: event.riskLevel,
+            requiresApproval: event.requiresApproval,
+            status: "running",
+            input: event.input,
+          },
+        ],
+      };
+    case "tool-result":
+      return {
+        ...message,
+        toolCalls: (message.toolCalls ?? []).map((toolCall) =>
+          toolCall.id === event.id
+            ? {
+                ...toolCall,
+                status: event.status,
+                output: event.output,
+                error: event.error,
+              }
+            : toolCall,
+        ),
+      };
+    case "approval-request":
+      return {
+        ...message,
+        toolCalls: (message.toolCalls ?? []).map((toolCall) =>
+          toolCall.id === event.eventId
+            ? { ...toolCall, status: "awaiting-approval" }
+            : toolCall,
+        ),
+      };
+    case "approval-resolved":
+      return {
+        ...message,
+        toolCalls: (message.toolCalls ?? []).map((toolCall) =>
+          toolCall.id === event.eventId &&
+          toolCall.status === "awaiting-approval"
+            ? {
+                ...toolCall,
+                status: event.decision === "approved" ? "running" : "failed",
+                error:
+                  event.decision === "approved"
+                    ? toolCall.error
+                    : `审批未通过（${event.decidedBy ?? "rejected"}）`,
+              }
+            : toolCall,
+        ),
+      };
+  }
+}
 
 // 读取 text/event-stream，按 `data: <json>` 逐条解析并回调，供打字机渲染使用。
 async function consumeChatStream(
@@ -944,6 +1052,9 @@ function ChatApp({
   const [localToolSnapshot, setLocalToolSnapshot] =
     useState<LocalToolBridgeSnapshot | null>(null);
   const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null);
+  const [sessionPresence, setSessionPresence] = useState<
+    SessionPresenceConnection[]
+  >([]);
   const [approvalPrompt, setApprovalPrompt] = useState<ApprovalPrompt | null>(
     null,
   );
@@ -961,8 +1072,13 @@ function ChatApp({
   // 稳定的客户端标识：事件流去重与上报当前会话用。
   const clientIdRef = useRef<string>(loadClientId());
   const clientId = clientIdRef.current;
+  const activeSessionIdRef = useRef(activeSessionId);
   // 事件流是否已连通：连通时降级兜底轮询频率。
   const [eventsConnected, setEventsConnected] = useState(false);
+
+  useEffect(() => {
+    activeSessionIdRef.current = activeSessionId;
+  }, [activeSessionId]);
 
   useEffect(() => {
     const bridge = new LocalToolBridge({
@@ -979,7 +1095,9 @@ function ChatApp({
       // 审批已定（本端或其他端/超时）：关闭仍开着的弹窗。
       onApprovalResolved: (resolved) =>
         setApprovalPrompt((current) =>
-          current && current.approvalId === resolved.approvalId ? null : current,
+          current && current.approvalId === resolved.approvalId
+            ? null
+            : current,
         ),
     });
     localToolBridgeRef.current = bridge;
@@ -1193,18 +1311,24 @@ function ChatApp({
       messageId?: string;
       text?: string;
       message?: Message;
+      event?: ToolRuntimeStreamEvent;
       session?: {
         id: string;
         title?: string;
         updatedAt?: string;
         lastMessagePreview?: string;
       };
+      connections?: SessionPresenceConnection[];
       originClientId?: string;
     }) => {
       if (event.originClientId && event.originClientId === clientId) {
         return; // 自己发的，已在本地渲染。
       }
-      if (event.type === "message.created" && event.sessionId && event.message) {
+      if (
+        event.type === "message.created" &&
+        event.sessionId &&
+        event.message
+      ) {
         const incoming = event.message;
         const sessionId = event.sessionId;
         setSessions((current) =>
@@ -1212,7 +1336,7 @@ function ChatApp({
             if (session.id !== sessionId) {
               return session;
             }
-            const merged = mergeServerMessages(session.messages, [incoming]);
+            const merged = upsertFinalServerMessage(session.messages, incoming);
             if (sameMessages(session.messages, merged)) {
               return session;
             }
@@ -1302,6 +1426,30 @@ function ChatApp({
               : session,
           ),
         );
+      } else if (
+        event.type === "tool-runtime" &&
+        event.sessionId &&
+        event.messageId &&
+        event.event
+      ) {
+        const sessionId = event.sessionId;
+        const messageId = event.messageId;
+        const toolEvent = event.event;
+        setSessions((current) =>
+          current.map((session) =>
+            session.id === sessionId
+              ? {
+                  ...session,
+                  messagesLoaded: true,
+                  messages: session.messages.map((message) =>
+                    message.id === messageId
+                      ? applyToolRuntimeEventToMessage(message, toolEvent)
+                      : message,
+                  ),
+                }
+              : session,
+          ),
+        );
       } else if (event.type === "session.updated" && event.session) {
         const updated = event.session;
         setSessions((current) =>
@@ -1318,6 +1466,14 @@ function ChatApp({
               : session,
           ),
         );
+      } else if (
+        event.type === "session.presence" &&
+        event.sessionId &&
+        Array.isArray(event.connections)
+      ) {
+        if (event.sessionId === activeSessionIdRef.current) {
+          setSessionPresence(event.connections);
+        }
       }
     };
 
@@ -1386,12 +1542,27 @@ function ChatApp({
   // 上报"当前打开的会话页"：仅当对端也在看同一 session 时服务端才推送该会话消息。
   useEffect(() => {
     const sessionId = activeSessionIsDraft ? null : activeSessionId || null;
-    void postActiveSession(clientId, sessionId);
+    void postActiveSession(clientId, sessionId, {
+      clientKind: "desktop",
+      clientLabel: "Muse Desktop",
+      remoteTarget:
+        localToolSnapshot?.deviceId && localToolSnapshot.workspace
+          ? {
+              deviceId: localToolSnapshot.deviceId,
+              workspaceId: localToolSnapshot.workspace.workspaceId,
+              deviceName: "Muse Desktop",
+              workspaceName: localToolSnapshot.workspace.displayName,
+            }
+          : null,
+    });
     return () => {
-      void postActiveSession(clientId, null);
+      void postActiveSession(clientId, null, {
+        clientKind: "desktop",
+        clientLabel: "Muse Desktop",
+        remoteTarget: null,
+      });
     };
-  }, [clientId, activeSessionId, activeSessionIsDraft]);
-
+  }, [clientId, activeSessionId, activeSessionIsDraft, localToolSnapshot]);
 
   const filteredSessions = useMemo(() => {
     // 草稿会话（尚未发送首条消息）不进入左侧历史列表，仅作为当前活动会话展示。
@@ -1409,6 +1580,30 @@ function ChatApp({
         .includes(keyword),
     );
   }, [searchText, sessions]);
+
+  const mobileConnections = useMemo(() => {
+    const desktopDeviceId = localToolSnapshot?.deviceId;
+    const desktopWorkspaceId = localToolSnapshot?.workspace?.workspaceId;
+    if (!desktopDeviceId || !desktopWorkspaceId) {
+      return [];
+    }
+    return sessionPresence.filter(
+      (connection) =>
+        connection.clientKind === "mobile" &&
+        connection.remoteTarget?.deviceId === desktopDeviceId &&
+        connection.remoteTarget.workspaceId === desktopWorkspaceId,
+    );
+  }, [
+    localToolSnapshot?.deviceId,
+    localToolSnapshot?.workspace?.workspaceId,
+    sessionPresence,
+  ]);
+
+  const mobileConnectionLabel = mobileConnections.length
+    ? mobileConnections
+        .map((connection) => connection.clientLabel || "Muse Mobile")
+        .join("、")
+    : "";
 
   function mergeRefreshedSessions(
     current: Session[],
@@ -2029,11 +2224,7 @@ function ChatApp({
       return;
     }
 
-    if (
-      event.key !== "Enter" ||
-      event.shiftKey ||
-      isComposerComposing(event)
-    ) {
+    if (event.key !== "Enter" || event.shiftKey || isComposerComposing(event)) {
       return;
     }
 
@@ -2074,9 +2265,7 @@ function ChatApp({
       // 已是自定义目录时保持不变；否则忽略（自定义需通过「浏览」选取）。
       return;
     }
-    const preset = workspacePresets.find(
-      (item) => item.workspaceId === value,
-    );
+    const preset = workspacePresets.find((item) => item.workspaceId === value);
     const resolved = preset ? presetToWorkspace(preset, homeDir) : null;
     if (resolved) {
       setCurrentWorkspace(resolved);
@@ -2100,9 +2289,7 @@ function ChatApp({
         rootPath: selected,
       });
     } catch (error) {
-      setNotice(
-        error instanceof Error ? error.message : "选择工作区目录失败",
-      );
+      setNotice(error instanceof Error ? error.message : "选择工作区目录失败");
     }
   }
 
@@ -2353,6 +2540,17 @@ function ChatApp({
               Session
             </span>
             <h1>{activeSession?.title ?? "新对话"}</h1>
+            {mobileConnections.length ? (
+              <div className="session-mobile-presence" role="status">
+                <span className="presence-dot" aria-hidden="true" />
+                <span>
+                  {mobileConnectionLabel} 正在连接此桌面端
+                  {localToolSnapshot?.workspace?.displayName
+                    ? ` · ${localToolSnapshot.workspace.displayName}`
+                    : ""}
+                </span>
+              </div>
+            ) : null}
           </div>
         </header>
 
@@ -2441,7 +2639,10 @@ function ChatApp({
                 <FolderOpen aria-hidden="true" size={16} strokeWidth={2.1} />
                 <span>浏览…</span>
               </button>
-              <span className="workspace-bar-path" title={activeWorkspace?.rootPath}>
+              <span
+                className="workspace-bar-path"
+                title={activeWorkspace?.rootPath}
+              >
                 {activeWorkspace ? activeWorkspace.rootPath : "未挂载本地目录"}
               </span>
             </div>
@@ -2470,9 +2671,7 @@ function ChatApp({
                     className={`tool-button ${webSearchEnabled ? "active" : ""}`}
                     aria-pressed={webSearchEnabled}
                     onClick={() => setWebSearchEnabled((value) => !value)}
-                    title={
-                      webSearchEnabled ? "联网检索已开启" : "开启联网检索"
-                    }
+                    title={webSearchEnabled ? "联网检索已开启" : "开启联网检索"}
                     type="button"
                   >
                     <Globe2 aria-hidden="true" size={20} strokeWidth={2.1} />
